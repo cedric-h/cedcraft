@@ -125,102 +125,6 @@ function mat4_perspective(fovy, aspect, near, far) {
 }
 
 
-function initBuffers(gl) {
-  function initPositionBuffer(gl) {
-    // Create a buffer for the square's positions.
-    const positionBuffer = gl.createBuffer();
-
-    // Select the positionBuffer as the one to apply buffer
-    // operations to from here out.
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-
-    const positions = [
-      // Front face
-      -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0,
-
-      // Back face
-      -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0,
-
-      // Top face
-      -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0,
-
-      // Bottom face
-      -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0,
-
-      // Right face
-      1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0,
-
-      // Left face
-      -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0,
-    ];
-
-    // Now pass the list of positions into WebGL to build the
-    // shape. We do this by creating a Float32Array from the
-    // JavaScript array, then use it to fill the current buffer.
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
-
-    return positionBuffer;
-  }
-
-  function initColorBuffer(gl) {
-    const faceColors = [
-      [1.0, 1.0, 1.0, 1.0], // Front face: white
-      [1.0, 0.0, 0.0, 1.0], // Back face: red
-      [0.0, 1.0, 0.0, 1.0], // Top face: green
-      [0.0, 0.0, 1.0, 1.0], // Bottom face: blue
-      [1.0, 1.0, 0.0, 1.0], // Right face: yellow
-      [1.0, 0.0, 1.0, 1.0], // Left face: purple
-    ];
-
-    // Convert the array of colors into a table for all the vertices.
-    var colors = [];
-
-    for (var j = 0; j < faceColors.length; ++j) {
-      const c = faceColors[j];
-      // Repeat each color four times for the four vertices of the face
-      colors = colors.concat(c, c, c, c);
-    }
-
-    const colorBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
-
-    return colorBuffer;
-  }
-
-  function initIndexBuffer(gl) {
-    const indexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-
-    const indices = [
-       0,  1,  2,  0,  2,  3, // front
-       4,  5,  6,  4,  6,  7, // back
-       8,  9, 10,  8, 10, 11, // top
-      12, 13, 14, 12, 14, 15, // bottom
-      16, 17, 18, 16, 18, 19, // right
-      20, 21, 22, 20, 22, 23, // left
-    ];
-
-    gl.bufferData(
-      gl.ELEMENT_ARRAY_BUFFER,
-      new Uint16Array(indices),
-      gl.STATIC_DRAW
-    );
-
-    return indexBuffer;
-  }
-
-  const positionBuffer = initPositionBuffer(gl);
-  const colorBuffer = initColorBuffer(gl);
-  const indexBuffer = initIndexBuffer(gl);
-
-  return {
-    position: positionBuffer,
-    color: colorBuffer,
-    indices: indexBuffer,
-  };
-}
-
 function cross3(x, y) {
   return [
     x[1] * y[2] - y[1] * x[2],
@@ -228,20 +132,29 @@ function cross3(x, y) {
     x[0] * y[1] - y[0] * x[1]
   ];
 }
+function dot(x, y) {
+  return (x[0]*y[0] + x[1]*y[1] + x[2]*y[2]);
+}
+function norm(vec) {
+  const mag = Math.sqrt(dot(vec, vec));
+  if (mag > 0) {
+    vec[0] /= mag;
+    vec[1] /= mag;
+    vec[2] /= mag;
+  }
+  return vec;
+}
 function add3(l, r) {
   return [l[0] + r[0],
           l[1] + r[1],
           l[2] + r[2]];
 }
 function mul3_f(v, f) {
-  v[0] *= f;
-  v[1] *= f;
-  v[2] *= f;
-  return v;
+  return [v[0] * f, v[1] * f, v[2] * f];
 }
 
 let state = {
-  pos: [0, 0, -12],
+  pos: [0, 0, 6],
   cam: { yaw_deg: 0, pitch_deg: 0 },
   keysdown: {},
 };
@@ -268,7 +181,7 @@ function cam_looking() {
   return looking;
 }
 
-function draw_scene(gl, programInfo, buffers, cubeRotation) {
+function draw_scene(gl, programInfo, geo) {
   gl.clearColor(0.0, 0.0, 0.0, 1.0);
   gl.clearDepth(1.0);
   gl.enable(gl.DEPTH_TEST);
@@ -277,29 +190,26 @@ function draw_scene(gl, programInfo, buffers, cubeRotation) {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   const side = cross3(VEC3_UP, cam_looking());
-  if (state.keysdown['KeyW']) state.pos = add3(state.pos, mul3_f(cam_looking(),  0.1));
-  if (state.keysdown['KeyS']) state.pos = add3(state.pos, mul3_f(cam_looking(), -0.1));
-  if (state.keysdown['KeyA']) state.pos = add3(state.pos, mul3_f(         side,  0.1));
-  if (state.keysdown['KeyD']) state.pos = add3(state.pos, mul3_f(         side, -0.1));
+  const fwd = cam_looking();
+  fwd[1] = 0;
+  norm(fwd);
+  if (state.keysdown['KeyW']) state.pos = add3(state.pos, mul3_f( fwd,  0.1));
+  if (state.keysdown['KeyS']) state.pos = add3(state.pos, mul3_f( fwd, -0.1));
+  if (state.keysdown['KeyA']) state.pos = add3(state.pos, mul3_f(side,  0.1));
+  if (state.keysdown['KeyD']) state.pos = add3(state.pos, mul3_f(side, -0.1));
 
   const fieldOfView = (45 * Math.PI) / 180;
   const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
   const zNear = 0.1;
   const zFar = 100.0;
   const projectionMatrix = mat4_perspective(fieldOfView, aspect, zNear, zFar);
-  const viewMatrix = mat4_target_to(
-    state.pos,
-    add3(cam_looking(), state.pos),
-    VEC3_UP
-  );
+  const eye = add3(state.pos, mul3_f(VEC3_UP, 1.8));
+  const viewMatrix = mat4_target_to(eye, add3(cam_looking(), eye), VEC3_UP);
   const viewProjectionMatrix = projectionMatrix.multiply(viewMatrix.inverse());
   // const viewProjectionMatrix = viewMatrix.multiply(projectionMatrix);
   // const viewProjectionMatrix = projectionMatrix;
 
-  cubeRotation *= 0.01;
-  const modelViewMatrix = new DOMMatrix()
-    .translate(-0, 0, 6)
-    .rotate(cubeRotation, cubeRotation * 0.7, cubeRotation * 0.3);
+  const modelViewMatrix = new DOMMatrix();
 
   {
     const numComponents = 3;
@@ -308,7 +218,7 @@ function draw_scene(gl, programInfo, buffers, cubeRotation) {
     const stride = 0; // how many bytes to get from one set of values to the next
     // 0 = use type and numComponents above
     const offset = 0; // how many bytes inside the buffer to start from
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+    gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
     gl.vertexAttribPointer(
       programInfo.attribLocations.vertexPosition,
       numComponents,
@@ -319,25 +229,8 @@ function draw_scene(gl, programInfo, buffers, cubeRotation) {
     );
     gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
   }
-  {
-    const numComponents = 4;
-    const type = gl.FLOAT;
-    const normalize = false;
-    const stride = 0;
-    const offset = 0;
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.color);
-    gl.vertexAttribPointer(
-      programInfo.attribLocations.vertexColor,
-      numComponents,
-      type,
-      normalize,
-      stride,
-      offset
-    );
-    gl.enableVertexAttribArray(programInfo.attribLocations.vertexColor);
-  }
 
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geo.gpu_indices);
   gl.useProgram(programInfo.program);
 
   // Set the shader uniforms
@@ -362,14 +255,13 @@ function draw_scene(gl, programInfo, buffers, cubeRotation) {
     const vertexCount = 36;
     const type = gl.UNSIGNED_SHORT;
     const offset = 0;
-    gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
+    gl.drawElements(gl.TRIANGLES, geo.vrts_used, type, offset);
   }
 }
 
 function initShaderProgram(gl) {
   const vsSource = `
     attribute vec4 aVertexPosition;
-    attribute vec4 aVertexColor;
 
     uniform mat4 uModelViewMatrix;
     uniform mat4 uProjectionMatrix;
@@ -378,7 +270,7 @@ function initShaderProgram(gl) {
 
     void main(void) {
       gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-      vColor = aVertexColor;
+      vColor = vec4(1);
     }
   `;
   const fsSource = `
@@ -435,7 +327,6 @@ function initShaderProgram(gl) {
     program: shaderProgram,
     attribLocations: {
       vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
-      vertexColor: gl.getAttribLocation(shaderProgram, "aVertexColor"),
     },
     uniformLocations: {
       viewProjectionMatrix: gl.getUniformLocation(
@@ -446,7 +337,18 @@ function initShaderProgram(gl) {
     },
   };
 
-  const buffers = initBuffers(gl);
+  let geo = {
+    gpu_position: gl.createBuffer(),
+    cpu_position: new Float32Array(1 << 15),
+    gpu_indices: gl.createBuffer(),
+    cpu_indices: new Uint16Array(1 << 15),
+    vrts_used: 0,
+    idxs_used: 0
+  };
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geo.gpu_indices);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geo.cpu_indices, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
+  gl.bufferData(gl.ARRAY_BUFFER, geo.cpu_position, gl.DYNAMIC_DRAW);
 
   canvas.addEventListener("click", () => {
     canvas.requestPointerLock({
@@ -468,10 +370,59 @@ function initShaderProgram(gl) {
   requestAnimationFrame(function render(now) {
     requestAnimationFrame(render);
 
+    {
+      let vrt_i = 0;
+      let idx_i = 0;
+
+      function place_tile(t_x, t_y, t_z) {
+        const tile_idx_i = vrt_i / 3;
+
+        const positions = new Float32Array([
+          // Top face
+          0.0, 0.0, 0.0,
+          0.0, 0.0, 1.0,
+          1.0, 0.0, 1.0,
+          1.0, 0.0, 0.0,
+        ]);
+        for (let i = 0; i < positions.length; i += 3) {
+          const x = positions[i + 0] + t_x;
+          const y = positions[i + 1] + t_y;
+          const z = positions[i + 2] + t_z;
+          geo.cpu_position[vrt_i++] = x;
+          geo.cpu_position[vrt_i++] = y;
+          geo.cpu_position[vrt_i++] = z;
+        }
+
+        geo.cpu_indices[idx_i++] = tile_idx_i+0;
+        geo.cpu_indices[idx_i++] = tile_idx_i+1;
+        geo.cpu_indices[idx_i++] = tile_idx_i+2;
+        geo.cpu_indices[idx_i++] = tile_idx_i+0;
+        geo.cpu_indices[idx_i++] = tile_idx_i+2;
+        geo.cpu_indices[idx_i++] = tile_idx_i+3;
+      }
+      for (let t_x = 0; t_x < 8; t_x++) 
+        for (let t_z = 0; t_z < 8; t_z++) 
+          if ((t_x^t_z)%2)
+            place_tile(t_x, 0, t_z);
+      place_tile(Math.floor(state.pos[0]),
+                 Math.floor(state.pos[1]),
+                 Math.floor(state.pos[2]));
+
+      // Create a buffer for the square's positions.
+      gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, geo.cpu_position);
+
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geo.gpu_indices);
+      gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, geo.cpu_indices);
+
+      geo.vrts_used = vrt_i;
+      geo.idxs_used = idx_i;
+    }
+
     let dt = 0;
     if (last != undefined) dt = now - last;
     last = now;
 
-    draw_scene(gl, programInfo, buffers, now);
+    draw_scene(gl, programInfo, geo);
   });
 })();
