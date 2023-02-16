@@ -32,15 +32,17 @@
  *  [ ] Pulleys
  */
 
-function mat4_target_to(out, eye, target, up) {
+const log = x => (console.log(x), x);
+const VEC3_UP = [0, 1, 0];
+
+function mat4_target_to(eye, target, up=VEC3_UP) {
   /**
    * Generates a matrix that makes something look at something else.
    *
-   * @param {mat4} out mat4 frustum matrix will be written into
-   * @param {ReadonlyVec3} eye Position of the viewer
-   * @param {ReadonlyVec3} center Point the viewer is looking at
-   * @param {ReadonlyVec3} up vec3 pointing up
-   * @returns {mat4} out
+   * eye = Position of the viewer
+   * center = Point the viewer is looking at
+   * up = vec3 pointing up
+   * returns mat4 out
    */
   var eyex = eye[0],
       eyey = eye[1],
@@ -72,6 +74,7 @@ function mat4_target_to(out, eye, target, up) {
     x2 *= len;
   }
 
+  const out = new DOMMatrix();
   out.m11 = x0;
   out.m12 = x1;
   out.m13 = x2;
@@ -218,7 +221,54 @@ function initBuffers(gl) {
   };
 }
 
-function drawScene(gl, programInfo, buffers, cubeRotation) {
+function cross3(x, y) {
+  return [
+    x[1] * y[2] - y[1] * x[2],
+    x[2] * y[0] - y[2] * x[0],
+    x[0] * y[1] - y[0] * x[1]
+  ];
+}
+function add3(l, r) {
+  return [l[0] + r[0],
+          l[1] + r[1],
+          l[2] + r[2]];
+}
+function mul3_f(v, f) {
+  v[0] *= f;
+  v[1] *= f;
+  v[2] *= f;
+  return v;
+}
+
+let state = {
+  pos: [0, 0, -12],
+  cam: { yaw_deg: 0, pitch_deg: 0 },
+  keysdown: {},
+};
+window.onmousemove = e => {
+  if (!document.pointerLockElement) return;
+  const dy = e.movementY * 0.35;
+  const dx = e.movementX * 0.35;
+  state.cam.pitch_deg = Math.max(-89, Math.min(89, state.cam.pitch_deg - dy));
+  state.cam.yaw_deg = (state.cam.yaw_deg - dx) % 360;
+};
+window.onkeydown = e => state.keysdown[e.code] = 1;
+window.onkeyup   = e => state.keysdown[e.code] = 0;
+function cam_looking() {
+  const yaw_sin   = Math.sin(state.cam.yaw_deg   / 180 * Math.PI);
+  const yaw_cos   = Math.cos(state.cam.yaw_deg   / 180 * Math.PI);
+  const pitch_sin = Math.sin(state.cam.pitch_deg / 180 * Math.PI);
+  const pitch_cos = Math.cos(state.cam.pitch_deg / 180 * Math.PI);
+
+  const looking = [
+    yaw_sin * pitch_cos,
+    pitch_sin,
+    yaw_cos * pitch_cos,
+  ];
+  return looking;
+}
+
+function draw_scene(gl, programInfo, buffers, cubeRotation) {
   gl.clearColor(0.0, 0.0, 0.0, 1.0);
   gl.clearDepth(1.0);
   gl.enable(gl.DEPTH_TEST);
@@ -226,15 +276,29 @@ function drawScene(gl, programInfo, buffers, cubeRotation) {
 
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
+  const side = cross3(VEC3_UP, cam_looking());
+  if (state.keysdown['KeyW']) state.pos = add3(state.pos, mul3_f(cam_looking(),  0.1));
+  if (state.keysdown['KeyS']) state.pos = add3(state.pos, mul3_f(cam_looking(), -0.1));
+  if (state.keysdown['KeyA']) state.pos = add3(state.pos, mul3_f(         side,  0.1));
+  if (state.keysdown['KeyD']) state.pos = add3(state.pos, mul3_f(         side, -0.1));
+
   const fieldOfView = (45 * Math.PI) / 180;
   const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
   const zNear = 0.1;
   const zFar = 100.0;
   const projectionMatrix = mat4_perspective(fieldOfView, aspect, zNear, zFar);
+  const viewMatrix = mat4_target_to(
+    state.pos,
+    add3(cam_looking(), state.pos),
+    VEC3_UP
+  );
+  const viewProjectionMatrix = projectionMatrix.multiply(viewMatrix.inverse());
+  // const viewProjectionMatrix = viewMatrix.multiply(projectionMatrix);
+  // const viewProjectionMatrix = projectionMatrix;
 
   cubeRotation *= 0.01;
   const modelViewMatrix = new DOMMatrix()
-    .translate(-0, 0, -6)
+    .translate(-0, 0, 6)
     .rotate(cubeRotation, cubeRotation * 0.7, cubeRotation * 0.3);
 
   {
@@ -284,9 +348,9 @@ function drawScene(gl, programInfo, buffers, cubeRotation) {
     mat.m41, mat.m42, mat.m43, mat.m44 
   ];
   gl.uniformMatrix4fv(
-    programInfo.uniformLocations.projectionMatrix,
+    programInfo.uniformLocations.viewProjectionMatrix,
     false,
-    mat_to_arr(projectionMatrix)
+    mat_to_arr(viewProjectionMatrix)
   );
   gl.uniformMatrix4fv(
     programInfo.uniformLocations.modelViewMatrix,
@@ -374,7 +438,7 @@ function initShaderProgram(gl) {
       vertexColor: gl.getAttribLocation(shaderProgram, "aVertexColor"),
     },
     uniformLocations: {
-      projectionMatrix: gl.getUniformLocation(
+      viewProjectionMatrix: gl.getUniformLocation(
         shaderProgram,
         "uProjectionMatrix"
       ),
@@ -383,6 +447,12 @@ function initShaderProgram(gl) {
   };
 
   const buffers = initBuffers(gl);
+
+  canvas.addEventListener("click", () => {
+    canvas.requestPointerLock({
+      unadjustedMovement: true
+    });
+  });
 
   (window.onresize = () => {
     gl.viewport(
@@ -402,6 +472,6 @@ function initShaderProgram(gl) {
     if (last != undefined) dt = now - last;
     last = now;
 
-    drawScene(gl, programInfo, buffers, now);
+    draw_scene(gl, programInfo, buffers, now);
   });
 })();
