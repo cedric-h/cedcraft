@@ -35,7 +35,6 @@
 const log = x => (console.log(x), x);
 const VEC3_UP = [0, 1, 0];
 const MAP_SIZE = 8;
-const VERT_FLOATS = 4;
 
 function mat4_target_to(eye, target, up=VEC3_UP) {
   /**
@@ -248,7 +247,7 @@ function draw_scene(gl, programInfo, geo) {
       /* numComponents */ 4,
       /* type          */ gl.FLOAT,
       /* normalize     */ false,
-      /* stride        */ VERT_FLOATS * Float32Array.BYTES_PER_ELEMENT,
+      /* stride        */ 0, // 3 * Float32Array.BYTES_PER_ELEMENT,
       /* offset        */ 0
     );
     gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
@@ -293,9 +292,9 @@ function initShaderProgram(gl) {
     varying lowp vec2 v_texcoord;
 
     void main(void) {
-      gl_Position = u_proj * u_mvp * vec4(a_vpos.x, a_vpos.y, a_vpos.z, 1.0);
-      v_texcoord.x =   mod(a_vpos.w , 16.0) / 16.0;
-      v_texcoord.y = floor(a_vpos.w / 16.0) / 16.0;
+      gl_Position = u_proj * u_mvp * vec4(a_vpos.x, a_vpos.y, a_vpos.z, 1);
+      v_texcoord.x = mod(a_vpos.x * 0.5, 1.0) * 2.0 / 16.0;
+      v_texcoord.y = mod(a_vpos.z * 0.5, 1.0) * 2.0 / 16.0;
       v_color = vec4(0.35, 0.6, 0.3, 1);
     }
   `;
@@ -469,11 +468,12 @@ async function ss_sprite(gl) {
     requestAnimationFrame(render);
 
     {
+      const VERT_SIZE = 4;
       let vrt_i = 0;
       let idx_i = 0;
 
-      function place_tile(t_x, t_y, t_z, tex_offset) {
-        const tile_idx_i = vrt_i / VERT_FLOATS;
+      function place_tile(t_x, t_y, t_z) {
+        const tile_idx_i = vrt_i / VERT_SIZE;
 
         const positions = new Float32Array([
           // Top face
@@ -482,17 +482,14 @@ async function ss_sprite(gl) {
            1.001, 0.0,  1.001,
            1.001, 0.0, -0.001,
         ]);
-        for (let i = 0; i < positions.length; i += 3) {
+        for (let i = 0; i < positions.length; i += VERT_SIZE) {
           const x = positions[i + 0] + t_x;
           const y = positions[i + 1] + t_y;
           const z = positions[i + 2] + t_z;
           geo.cpu_position[vrt_i++] = x;
           geo.cpu_position[vrt_i++] = y;
           geo.cpu_position[vrt_i++] = z;
-          if ((i/3) == 0) geo.cpu_position[vrt_i++] = tex_offset +  0 + 0;
-          if ((i/3) == 1) geo.cpu_position[vrt_i++] = tex_offset +  0 + 1;
-          if ((i/3) == 2) geo.cpu_position[vrt_i++] = tex_offset + 16 + 1;
-          if ((i/3) == 3) geo.cpu_position[vrt_i++] = tex_offset + 16 + 0;
+          geo.cpu_position[vrt_i++] = 1;
         }
 
         geo.cpu_indices[idx_i++] = tile_idx_i+0;
@@ -516,16 +513,15 @@ async function ss_sprite(gl) {
 
       for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
         for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
+          let draw = state.map[t_x*MAP_SIZE + t_z];
           if (t_x == mouse_t_x && t_z == mouse_t_z )
-            place_tile(t_x, 0, t_z, 1);
-          else {
-            let draw = state.map[t_x*MAP_SIZE + t_z];
-            if (draw) place_tile(t_x, 0, t_z, 0);
-          }
+            draw = !draw;
+
+          if (draw) place_tile(t_x, 0, t_z);
         }
       place_tile(Math.floor(state.pos[0]),
                  Math.floor(state.pos[1]),
-                 Math.floor(state.pos[2]), 2);
+                 Math.floor(state.pos[2]));
 
 
       // Create a buffer for the square's positions.
