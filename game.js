@@ -656,11 +656,6 @@ async function ss_sprite(gl) {
             const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
             let draw = state.map[index];
 
-            if (state.mining.block_coord) {
-              const [x, y, z] = state.mining.block_coord;
-              if (t_x == x && t_y == y && t_z == z)
-                continue;
-            }
             if (draw) place_cube(t_x, t_y, t_z, draw-1);
           }
       place_cube(Math.floor(state.pos[0]),
@@ -668,17 +663,10 @@ async function ss_sprite(gl) {
                  Math.floor(state.pos[2]), 2);
 
       const cast = ray_to_map(cam_eye(), cam_looking());
-      if (cast.coord && state.mining.ts_end > Date.now()) {
+      if (cast.coord && state.mining.block_coord) {
         let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
         t = ease_out_circ(t);
-
-        const [t_x, t_y, t_z] = state.mining.block_coord;
-        const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
-        let draw = state.map[index];
-        if (draw) {
-          place_cube(t_x, t_y, t_z, draw-1);
-          place_cube(...cast.coord, 15*15 + Math.floor(lerp(0, 10, t)));
-        }
+        place_cube(...cast.coord, 15*15 + Math.floor(lerp(0, 10, t)));
       }
       if (cast.index != undefined                  &&
           cast.index <  MAP_SIZE*MAP_SIZE*MAP_SIZE &&
