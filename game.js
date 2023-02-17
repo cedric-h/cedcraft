@@ -37,6 +37,8 @@ const VEC3_UP = [0, 1, 0];
 const MAP_SIZE = 8;
 const VERT_FLOATS = 4;
 
+function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
+
 function mat4_target_to(eye, target, up=VEC3_UP) {
   /**
    * Generates a matrix that makes something look at something else.
@@ -165,24 +167,81 @@ function ray_to_plane(p, v, n, d) {
 }
 
 let state = {
-  pos: [0, 0, 6],
-  map: new Uint8Array(MAP_SIZE * MAP_SIZE),
+  pos: [0, 2, 6],
+  map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
   cam: { yaw_deg: 0, pitch_deg: 0 },
   keysdown: {},
 };
 for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
-  for (let t_z = 0; t_z < MAP_SIZE; t_z++) 
-    state.map[t_x*MAP_SIZE + t_z] = (t_x^t_z)%2;
+  for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
+    const t_y = 1;
+    state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = (t_x^t_z)%2;
+  }
+function ray_to_map(ray_origin, ray_direction) {
+  const ret = {
+    impact: [0, 0, 0],
+    side: undefined,
+    index: undefined,
+    last_index: undefined,
+  };
+
+  // calculate distances to axis boundries and direction of discrete DDA steps
+  const map = [Math.floor(ray_origin[0]),
+               Math.floor(ray_origin[1]),
+               Math.floor(ray_origin[2]) ];
+  const deltaDist = [0, 0, 0];
+  const step = [0, 0, 0];
+  for (let i = 0; i < 3; i++) {
+    const x = (ray_direction[0] / ray_direction[i]);
+    const y = (ray_direction[1] / ray_direction[i]);
+    const z = (ray_direction[2] / ray_direction[i]);
+    deltaDist[i] = Math.sqrt(x*x + y*y + z*z);
+    if (ray_direction[i] < 0) {
+      step[i] = -1;
+      ret.impact[i] = (ray_origin[i] - map[i]) * deltaDist[i];
+    } else {
+      step[i] = 1;
+      ret.impact[i] = (map[i] + 1 - ray_origin[i]) * deltaDist[i];
+    }
+  }
+
+  // perform "DDA"
+  while (true) {
+
+    // determine what side dimension should be incremented
+    ret.side = 0;
+    for (let i = 1; i < 3; ++i)
+      if (ret.impact[ret.side] > ret.impact[i])
+        ret.side = i;
+
+    ret.impact[ret.side] += deltaDist[ret.side];
+    map[ret.side] += step[ret.side];
+    if (map[ret.side] <  0       ||
+        map[ret.side] >= MAP_SIZE)
+      break; // out of bounds
+
+    // sample volume data at calculated position and make collision calculations
+    ret.last_index = ret.index;
+    ret.index = map[0]*MAP_SIZE*MAP_SIZE + map[1]*MAP_SIZE + map[2];
+
+    // closest voxel is found, no more work to be done
+    if (state.map[ret.index]) break;
+  }
+
+  return ret;
+}
 
 window.onmousedown = e => {
   if (!document.pointerLockElement) return;
 
-  const eye = cam_eye();
-  let p = ray_to_plane(cam_eye(), cam_looking(), VEC3_UP, 0);
-  if (p) {
-    const t_x = Math.floor(p[0]);
-    const t_z = Math.floor(p[2]);
-    state.map[t_x*MAP_SIZE + t_z] = !state.map[t_x*MAP_SIZE + t_z];
+  if (e.button == 2) {
+    e.preventDefault();
+
+    const cast = ray_to_map(cam_eye(), cam_looking());
+    state.map[cast.last_index] = 1;
+  } else {
+    const cast = ray_to_map(cam_eye(), cam_looking());
+    state.map[cast.index] = 0;
   }
 }
 window.onmousemove = e => {
@@ -278,7 +337,7 @@ function draw_scene(gl, programInfo, geo) {
   {
     const type = gl.UNSIGNED_SHORT;
     const offset = 0;
-    gl.drawElements(gl.TRIANGLES, geo.vrts_used, type, offset);
+    gl.drawElements(gl.TRIANGLES, geo.idxs_used, type, offset);
   }
 }
 
@@ -476,55 +535,48 @@ async function ss_sprite(gl) {
         const tile_idx_i = vrt_i / VERT_FLOATS;
 
         const positions = new Float32Array([
-          // Top face
-          -0.001, 0.0, -0.001,
-          -0.001, 0.0,  1.001,
-           1.001, 0.0,  1.001,
-           1.001, 0.0, -0.001,
+          0, 0, 1,   1, 0, 1,   1, 1, 1,   0, 1, 1, // Front face
+          0, 0, 0,   0, 1, 0,   1, 1, 0,   1, 0, 0, // Back face
+          0, 1, 0,   0, 1, 1,   1, 1, 1,   1, 1, 0, // Top face
+          0, 0, 0,   1, 0, 0,   1, 0, 1,   0, 0, 1, // Bottom face
+          1, 0, 0,   1, 1, 0,   1, 1, 1,   1, 0, 1, // Right face
+          0, 0, 0,   0, 0, 1,   0, 1, 1,   0, 1, 0, // Left face
         ]);
         for (let i = 0; i < positions.length; i += 3) {
-          const x = positions[i + 0] + t_x;
-          const y = positions[i + 1] + t_y;
-          const z = positions[i + 2] + t_z;
+          const x = lerp(-0.00, 1.00, positions[i + 0]) + t_x;
+          const y = lerp(-0.00, 1.00, positions[i + 1]) + t_y;
+          const z = lerp(-0.00, 1.00, positions[i + 2]) + t_z;
           geo.cpu_position[vrt_i++] = x;
           geo.cpu_position[vrt_i++] = y;
           geo.cpu_position[vrt_i++] = z;
-          if ((i/3) == 0) geo.cpu_position[vrt_i++] = tex_offset +  0 + 0;
-          if ((i/3) == 1) geo.cpu_position[vrt_i++] = tex_offset +  0 + 1;
-          if ((i/3) == 2) geo.cpu_position[vrt_i++] = tex_offset + 16 + 1;
-          if ((i/3) == 3) geo.cpu_position[vrt_i++] = tex_offset + 16 + 0;
+          if ((i/3)%4 == 0) geo.cpu_position[vrt_i++] = tex_offset +  0 + 0;
+          if ((i/3)%4 == 1) geo.cpu_position[vrt_i++] = tex_offset +  0 + 1;
+          if ((i/3)%4 == 2) geo.cpu_position[vrt_i++] = tex_offset + 16 + 1;
+          if ((i/3)%4 == 3) geo.cpu_position[vrt_i++] = tex_offset + 16 + 0;
         }
 
-        geo.cpu_indices[idx_i++] = tile_idx_i+0;
-        geo.cpu_indices[idx_i++] = tile_idx_i+1;
-        geo.cpu_indices[idx_i++] = tile_idx_i+2;
-        geo.cpu_indices[idx_i++] = tile_idx_i+0;
-        geo.cpu_indices[idx_i++] = tile_idx_i+2;
-        geo.cpu_indices[idx_i++] = tile_idx_i+3;
+        for (const i_o of [
+           0,  1,  2,  0,  2,  3, // front
+           4,  5,  6,  4,  6,  7, // back
+           8,  9, 10,  8, 10, 11, // top
+          12, 13, 14, 12, 14, 15, // bottom
+          16, 17, 18, 16, 18, 19, // right
+          20, 21, 22, 20, 22, 23, // left
+        ])
+          geo.cpu_indices[idx_i++] = tile_idx_i+i_o;
       }
 
-      let mouse_t_x;
-      let mouse_t_z;
-      {
-        const eye = cam_eye();
-        let p = ray_to_plane(cam_eye(), cam_looking(), VEC3_UP, 0);
-        if (p) {
-          mouse_t_x = Math.floor(p[0]);
-          mouse_t_z = Math.floor(p[2]);
-        }
-      }
-
+      const cast = ray_to_map(cam_eye(), cam_looking());
       for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
-        for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
-          if (t_x == mouse_t_x && t_z == mouse_t_z )
-            place_tile(t_x, 0, t_z, 1);
-          else {
-            let draw = state.map[t_x*MAP_SIZE + t_z];
-            if (draw) place_tile(t_x, 0, t_z, 0);
+        for (let t_y = 0; t_y < MAP_SIZE; t_y++) 
+          for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
+            const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
+            let draw = state.map[index];
+                 if (cast.last_index == index) place_tile(t_x, t_y, t_z, 5);
+            else if (draw)                     place_tile(t_x, t_y, t_z, draw-1);
           }
-        }
       place_tile(Math.floor(state.pos[0]),
-                 Math.floor(state.pos[1]),
+                 Math.floor(state.pos[1]) - 1,
                  Math.floor(state.pos[2]), 2);
 
 
