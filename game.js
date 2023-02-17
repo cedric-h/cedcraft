@@ -46,6 +46,9 @@ const VERT_FLOATS = 4;
 
 function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
 function inv_lerp(min, max, p) { return (((p) - (min)) / ((max) - (min))); }
+function ease_out_sine(x) {
+  return Math.sin((x * Math.PI) / 2);
+}
 function ease_out_circ(x) {
   return Math.sqrt(1 - Math.pow(x - 1, 2));
 }
@@ -159,10 +162,16 @@ function norm(vec) {
   }
   return vec;
 }
+function mag3(vec) { return Math.sqrt(dot(vec, vec)); }
 function add3(l, r) {
   return [l[0] + r[0],
           l[1] + r[1],
           l[2] + r[2]];
+}
+function sub3(l, r) {
+  return [l[0] - r[0],
+          l[1] - r[1],
+          l[2] - r[2]];
 }
 function mul3_f(v, f) {
   return [v[0] * f, v[1] * f, v[2] * f];
@@ -179,6 +188,12 @@ function ray_to_plane(p, v, n, d) {
 
 let state = {
   pos: [0, 2, 6],
+  inventory: [],
+  items: [
+    { pos: [3.0, 1.8, 3], tex: 5 },
+    { pos: [4.5, 1.8, 3], tex: 4 },
+    { pos: [6.0, 1.8, 3], tex: 3 },
+  ],
   map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
   cam: { yaw_deg: 0, pitch_deg: 0 },
   keysdown: {},
@@ -188,7 +203,7 @@ let state = {
 for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
   for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
     const t_y = 1;
-    state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = (t_x^t_z)%2;
+    state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = 1;
   }
 function ray_to_map(ray_origin, ray_direction) {
   const ret = {
@@ -258,7 +273,7 @@ window.onmousedown = e => {
   if (!document.pointerLockElement) return;
   if (e.button == 0) state.mousedown = 1;
 
-  if (e.button == 2) {
+  if (e.button == 2 && state.inventory.length) {
     e.preventDefault();
 
     const cast = ray_to_map(cam_eye(), cam_looking());
@@ -268,7 +283,7 @@ window.onmousedown = e => {
       p[cast.side] -= cast.dir;
       const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
 
-      state.map[index] = 3;
+      state.map[index] = state.inventory.pop().tex;
     }
   }
 }
@@ -324,11 +339,20 @@ function draw_scene(gl, program_info, geo) {
   if (state.keysdown['KeyA']) state.pos = add3(state.pos, mul3_f(side,  0.1));
   if (state.keysdown['KeyD']) state.pos = add3(state.pos, mul3_f(side, -0.1));
 
+  state.items = state.items.filter(item => {
+    if (mag3(sub3(item.pos, state.pos)) < 0.8) {
+      state.inventory.push(item);
+      return false;
+    }
+    return true;
+  });
+
   const cast = ray_to_map(cam_eye(), cam_looking());
   if (cast.coord && cast.coord+'' == state.mining.block_coord+'') {
     if (state.mining.ts_end < Date.now()) {
       const p = [...state.mining.block_coord];
       const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+      state.items.push({ pos: [p[0], p[1] - 0.2, p[2]], tex: state.map[index] });
       state.map[index] = 0;
     }
   } else {
@@ -339,7 +363,7 @@ function draw_scene(gl, program_info, geo) {
     if (state.mousedown && (block_coord == undefined || ts_end < Date.now())) {
       state.mining.block_coord = cast.coord;
       state.mining.ts_start = Date.now();
-      state.mining.ts_end = Date.now() + 1000;
+      state.mining.ts_end = Date.now() + 850;
     }
   }
 
@@ -665,7 +689,7 @@ async function ss_sprite(gl) {
       const cast = ray_to_map(cam_eye(), cam_looking());
       if (cast.coord && state.mining.block_coord) {
         let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
-        t = ease_out_circ(t);
+        t = ease_out_sine(t);
         place_cube(...cast.coord, 15*15 + Math.floor(lerp(0, 10, t)));
       }
       if (cast.index != undefined                  &&
@@ -680,6 +704,13 @@ async function ss_sprite(gl) {
         scale[cast.side] = 0.004;
         const mat = new DOMMatrix().scale(...scale);
         place_cube(...p, 3*15 + 1, { mat, transparent: 1 });
+      }
+      
+      for (const { pos, tex } of state.items) {
+        const mat = new DOMMatrix()
+          .rotate(0, Date.now()/100, 0)
+          .scale(0.3, 0.3, 0.3);
+        place_cube(...pos, tex-1, { mat });
       }
 
       // Create a buffer for the square's positions.
