@@ -2,28 +2,35 @@
 // vim: sw=2 ts=2 expandtab smartindent ft=javascript
 
 /* ENGINE
- *  [ ] Camera
+ *  [x] Camera
  *  [ ] Skybox
-
+ *  [ ] Ambient Occlusion
+ *
  *  [ ] 2D Physics
  *  [ ] Jump
  *
  *  [ ] Splitscreen
  *  [ ] State Cache
-
+ * 
  *  [ ] Networking
  *  [ ] Chat
  *
  * SANDBOX
- *  [ ] Break
- *  [ ] Place
+ *  [x] Break
+ *  [x] Place
  *  [ ] Pick Up
  *
  *  [ ] Hotbar
- *  [ ] Item break speeds
+ *  [ ] Numerals
+ *
+ *  [ ] Tree
+ *  [ ] Sapling
  *
  *  [ ] Inventory
+ *  [ ] Crafting Table
  *  [ ] Furnace
+ *
+ *  [ ] Item break speeds
  *  [ ] Chest
  *
  * DAY DREAM
@@ -38,6 +45,10 @@ const MAP_SIZE = 8;
 const VERT_FLOATS = 4;
 
 function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
+function inv_lerp(min, max, p) { return (((p) - (min)) / ((max) - (min))); }
+function ease_out_circ(x) {
+  return Math.sqrt(1 - Math.pow(x - 1, 2));
+}
 
 function mat4_target_to(eye, target, up=VEC3_UP) {
   /**
@@ -171,6 +182,8 @@ let state = {
   map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
   cam: { yaw_deg: 0, pitch_deg: 0 },
   keysdown: {},
+  mousedown: 0,
+  mining: { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() },
 };
 for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
   for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
@@ -181,8 +194,13 @@ function ray_to_map(ray_origin, ray_direction) {
   const ret = {
     impact: [0, 0, 0],
     side: undefined,
+    dir: undefined,
+
     index: undefined,
     last_index: undefined,
+
+    coord: [0, 0, 0],
+    last_coord: [0, 0, 0],
   };
 
   // calculate distances to axis boundries and direction of discrete DDA steps
@@ -213,6 +231,7 @@ function ray_to_map(ray_origin, ray_direction) {
     for (let i = 1; i < 3; ++i)
       if (ret.impact[ret.side] > ret.impact[i])
         ret.side = i;
+    ret.dir = step[ret.side];
 
     ret.impact[ret.side] += deltaDist[ret.side];
     map[ret.side] += step[ret.side];
@@ -224,25 +243,40 @@ function ray_to_map(ray_origin, ray_direction) {
     ret.last_index = ret.index;
     ret.index = map[0]*MAP_SIZE*MAP_SIZE + map[1]*MAP_SIZE + map[2];
 
+    ret.last_coord = ret.coord;
+    ret.coord = [map[0], map[1], map[2]];
+
     // closest voxel is found, no more work to be done
-    if (state.map[ret.index]) break;
+    if (state.map[ret.index]) return ret;
   }
 
+  ret.index = ret.coord = undefined;
   return ret;
 }
 
 window.onmousedown = e => {
   if (!document.pointerLockElement) return;
+  if (e.button == 0) state.mousedown = 1;
 
   if (e.button == 2) {
     e.preventDefault();
 
     const cast = ray_to_map(cam_eye(), cam_looking());
-    state.map[cast.last_index] = 1;
-  } else {
-    const cast = ray_to_map(cam_eye(), cam_looking());
-    state.map[cast.index] = 0;
+
+    if (cast.coord) {
+      const p = [...cast.coord];
+      p[cast.side] -= cast.dir;
+      const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+
+      state.map[index] = 3;
+    }
   }
+}
+window.onmouseup = e => {
+  if (!document.pointerLockElement) return;
+  if (e.button == 0) state.mousedown = 0;
+
+  state.mining = { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() };
 }
 window.onmousemove = e => {
   if (!document.pointerLockElement) return;
@@ -270,12 +304,15 @@ function cam_looking() {
   return looking;
 }
 
-function draw_scene(gl, programInfo, geo) {
-  gl.clearColor(0.0, 0.0, 0.0, 1.0);
-  gl.clearDepth(1.0);
+function draw_scene(gl, program_info, geo) {
   gl.enable(gl.DEPTH_TEST);
   gl.depthFunc(gl.LEQUAL);
 
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+  gl.clearColor(0.0, 0.0, 0.0, 1.0);
+  gl.clearDepth(1.0);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   const side = cross3(VEC3_UP, cam_looking());
@@ -286,6 +323,25 @@ function draw_scene(gl, programInfo, geo) {
   if (state.keysdown['KeyS']) state.pos = add3(state.pos, mul3_f( fwd, -0.1));
   if (state.keysdown['KeyA']) state.pos = add3(state.pos, mul3_f(side,  0.1));
   if (state.keysdown['KeyD']) state.pos = add3(state.pos, mul3_f(side, -0.1));
+
+  const cast = ray_to_map(cam_eye(), cam_looking());
+  if (cast.coord && cast.coord+'' == state.mining.block_coord+'') {
+    if (state.mining.ts_end < Date.now()) {
+      const p = [...state.mining.block_coord];
+      const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+      state.map[index] = 0;
+    }
+  } else {
+    state.mining = { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() };
+  }
+  {
+    const { block_coord, ts_end } = state.mining;
+    if (state.mousedown && (block_coord == undefined || ts_end < Date.now())) {
+      state.mining.block_coord = cast.coord;
+      state.mining.ts_start = Date.now();
+      state.mining.ts_end = Date.now() + 1000;
+    }
+  }
 
   const fieldOfView = (45 * Math.PI) / 180;
   const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
@@ -300,21 +356,32 @@ function draw_scene(gl, programInfo, geo) {
 
   const modelViewMatrix = new DOMMatrix();
 
+  gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
   {
-    gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
     gl.vertexAttribPointer(
-      /* index         */ programInfo.attribLocations.vertexPosition,
+      /* index         */ program_info.attribLocations.a_vpos,
       /* numComponents */ 4,
       /* type          */ gl.FLOAT,
       /* normalize     */ false,
       /* stride        */ VERT_FLOATS * Float32Array.BYTES_PER_ELEMENT,
       /* offset        */ 0
     );
-    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+    gl.enableVertexAttribArray(program_info.attribLocations.a_vpos);
+  }
+  {
+    gl.vertexAttribPointer(
+      /* index         */ program_info.attribLocations.a_tex_i,
+      /* numComponents */ 2,
+      /* type          */ gl.UNSIGNED_BYTE,
+      /* normalize     */ false,
+      /* stride        */ VERT_FLOATS * Float32Array.BYTES_PER_ELEMENT,
+      /* offset        */           3 * Float32Array.BYTES_PER_ELEMENT,
+    );
+    gl.enableVertexAttribArray(program_info.attribLocations.a_tex_i);
   }
 
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geo.gpu_indices);
-  gl.useProgram(programInfo.program);
+  gl.useProgram(program_info.program);
 
   // Set the shader uniforms
   const mat_to_arr = mat => [
@@ -324,12 +391,12 @@ function draw_scene(gl, programInfo, geo) {
     mat.m41, mat.m42, mat.m43, mat.m44 
   ];
   gl.uniformMatrix4fv(
-    programInfo.uniformLocations.viewProjectionMatrix,
+    program_info.uniformLocations.viewProjectionMatrix,
     false,
     mat_to_arr(viewProjectionMatrix)
   );
   gl.uniformMatrix4fv(
-    programInfo.uniformLocations.modelViewMatrix,
+    program_info.uniformLocations.modelViewMatrix,
     false,
     mat_to_arr(modelViewMatrix)
   );
@@ -341,9 +408,10 @@ function draw_scene(gl, programInfo, geo) {
   }
 }
 
-function initShaderProgram(gl) {
+function init_shader_program(gl) {
   const vsSource = `
-    attribute vec4 a_vpos;
+    attribute vec3 a_vpos;
+    attribute vec2 a_tex_i;
 
     uniform mat4 u_mvp;
     uniform mat4 u_proj;
@@ -353,9 +421,12 @@ function initShaderProgram(gl) {
 
     void main(void) {
       gl_Position = u_proj * u_mvp * vec4(a_vpos.x, a_vpos.y, a_vpos.z, 1.0);
-      v_texcoord.x =   mod(a_vpos.w , 16.0) / 16.0;
-      v_texcoord.y = floor(a_vpos.w / 16.0) / 16.0;
-      v_color = vec4(0.35, 0.6, 0.3, 1);
+      v_texcoord.x =   mod(a_tex_i.x , 15.0) / 16.0;
+      v_texcoord.y = floor(a_tex_i.x / 15.0) / 16.0;
+      if (a_tex_i.y == 2.0)
+        v_color = vec4(vec3(0.6)*0.35, 0.35);
+      else
+        v_color = mix(vec4(1.0), vec4(0.48, 0.65, 0.4, 1), a_tex_i.y);
     }
   `;
   const fsSource = `
@@ -386,19 +457,19 @@ function initShaderProgram(gl) {
   const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
   const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
 
-  const shaderProgram = gl.createProgram();
-  gl.attachShader(shaderProgram, vertexShader);
-  gl.attachShader(shaderProgram, fragmentShader);
-  gl.linkProgram(shaderProgram);
+  const shader_program = gl.createProgram();
+  gl.attachShader(shader_program, vertexShader);
+  gl.attachShader(shader_program, fragmentShader);
+  gl.linkProgram(shader_program);
 
-  if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS))
+  if (!gl.getProgramParameter(shader_program, gl.LINK_STATUS))
     throw new Error(
       `Unable to initialize the shader program: ${gl.getProgramInfoLog(
-        shaderProgram
+        shader_program
       )}`
     );
 
-  return shaderProgram;
+  return shader_program;
 }
 
 function gl_upload_image(gl, image, i) {
@@ -468,19 +539,20 @@ async function ss_sprite(gl) {
     "Unable to initialize WebGL. Your browser or machine may not support it."
   );
 
-  const shaderProgram = initShaderProgram(gl);
+  const shader_program = init_shader_program(gl);
 
-  const programInfo = {
-    program: shaderProgram,
+  const program_info = {
+    program: shader_program,
     attribLocations: {
-      vertexPosition: gl.getAttribLocation(shaderProgram, "a_vpos"),
+      a_vpos: gl.getAttribLocation(shader_program, "a_vpos"),
+      a_tex_i: gl.getAttribLocation(shader_program, "a_tex_i"),
     },
     uniformLocations: {
       viewProjectionMatrix: gl.getUniformLocation(
-        shaderProgram,
+        shader_program,
         "u_proj"
       ),
-      modelViewMatrix: gl.getUniformLocation(shaderProgram, "u_mvp"),
+      modelViewMatrix: gl.getUniformLocation(shader_program, "u_mvp"),
     },
   };
 
@@ -531,7 +603,8 @@ async function ss_sprite(gl) {
       let vrt_i = 0;
       let idx_i = 0;
 
-      function place_tile(t_x, t_y, t_z, tex_offset) {
+      const ident = new DOMMatrix();
+      function place_cube(t_x, t_y, t_z, tex_offset, opts={}) {
         const tile_idx_i = vrt_i / VERT_FLOATS;
 
         const positions = new Float32Array([
@@ -543,16 +616,27 @@ async function ss_sprite(gl) {
           0, 0, 0,   0, 0, 1,   0, 1, 1,   0, 1, 0, // Left face
         ]);
         for (let i = 0; i < positions.length; i += 3) {
-          const x = lerp(-0.00, 1.00, positions[i + 0]) + t_x;
-          const y = lerp(-0.00, 1.00, positions[i + 1]) + t_y;
-          const z = lerp(-0.00, 1.00, positions[i + 2]) + t_z;
-          geo.cpu_position[vrt_i++] = x;
-          geo.cpu_position[vrt_i++] = y;
-          geo.cpu_position[vrt_i++] = z;
-          if ((i/3)%4 == 0) geo.cpu_position[vrt_i++] = tex_offset +  0 + 0;
-          if ((i/3)%4 == 1) geo.cpu_position[vrt_i++] = tex_offset +  0 + 1;
-          if ((i/3)%4 == 2) geo.cpu_position[vrt_i++] = tex_offset + 16 + 1;
-          if ((i/3)%4 == 3) geo.cpu_position[vrt_i++] = tex_offset + 16 + 0;
+          const x = positions[i + 0] - 0.5;
+          const y = positions[i + 1] - 0.5;
+          const z = positions[i + 2] - 0.5;
+          const p = new DOMPoint(x, y, z).matrixTransform(opts.mat ?? ident);
+          geo.cpu_position[vrt_i++] = p.x + 0.5 + t_x;
+          geo.cpu_position[vrt_i++] = p.y + 0.5 + t_y;
+          geo.cpu_position[vrt_i++] = p.z + 0.5 + t_z;
+
+          const u8_cast = new Uint8Array(
+            geo.cpu_position.buffer,
+            Float32Array.BYTES_PER_ELEMENT * vrt_i++
+          );
+
+          if ((i/3)%4 == 0) u8_cast[0] = tex_offset +  0 + 0;
+          if ((i/3)%4 == 1) u8_cast[0] = tex_offset +  0 + 1;
+          if ((i/3)%4 == 2) u8_cast[0] = tex_offset + 15 + 1;
+          if ((i/3)%4 == 3) u8_cast[0] = tex_offset + 15 + 0;
+
+          u8_cast[1] = 0;
+          if (tex_offset == 0)     u8_cast[1] = 1;
+          if (opts.transparent || tex_offset >= 15*15) u8_cast[1] = 2;
         }
 
         for (const i_o of [
@@ -566,19 +650,49 @@ async function ss_sprite(gl) {
           geo.cpu_indices[idx_i++] = tile_idx_i+i_o;
       }
 
-      const cast = ray_to_map(cam_eye(), cam_looking());
       for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
         for (let t_y = 0; t_y < MAP_SIZE; t_y++) 
           for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
             const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
             let draw = state.map[index];
-                 if (cast.last_index == index) place_tile(t_x, t_y, t_z, 5);
-            else if (draw)                     place_tile(t_x, t_y, t_z, draw-1);
+
+            if (state.mining.block_coord) {
+              const [x, y, z] = state.mining.block_coord;
+              if (t_x == x && t_y == y && t_z == z)
+                continue;
+            }
+            if (draw) place_cube(t_x, t_y, t_z, draw-1);
           }
-      place_tile(Math.floor(state.pos[0]),
+      place_cube(Math.floor(state.pos[0]),
                  Math.floor(state.pos[1]) - 1,
                  Math.floor(state.pos[2]), 2);
 
+      const cast = ray_to_map(cam_eye(), cam_looking());
+      if (cast.coord && state.mining.ts_end > Date.now()) {
+        let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
+        t = ease_out_circ(t);
+
+        const [t_x, t_y, t_z] = state.mining.block_coord;
+        const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
+        let draw = state.map[index];
+        if (draw) {
+          place_cube(t_x, t_y, t_z, draw-1);
+          place_cube(...cast.coord, 15*15 + Math.floor(lerp(0, 10, t)));
+        }
+      }
+      if (cast.index != undefined                  &&
+          cast.index <  MAP_SIZE*MAP_SIZE*MAP_SIZE &&
+          cast.index >= 0                            
+      ) {
+        const p = [...cast.coord];
+        const thickness = 0.04;
+        p[cast.side] -= cast.dir*0.5;
+
+        const scale = [1, 1, 1];
+        scale[cast.side] = 0.004;
+        const mat = new DOMMatrix().scale(...scale);
+        place_cube(...p, 3*15 + 1, { mat, transparent: 1 });
+      }
 
       // Create a buffer for the square's positions.
       gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
@@ -595,6 +709,6 @@ async function ss_sprite(gl) {
     if (last != undefined) dt = now - last;
     last = now;
 
-    draw_scene(gl, programInfo, geo);
+    draw_scene(gl, program_info, geo);
   });
 })();
