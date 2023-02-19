@@ -42,7 +42,7 @@
 const log = x => (console.log(x), x);
 const VEC3_UP = [0, 1, 0];
 const MAP_SIZE = 8;
-const VERT_FLOATS = 4;
+const VERT_FLOATS = 5;
 
 function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
 function inv_lerp(min, max, p) { return (((p) - (min)) / ((max) - (min))); }
@@ -53,94 +53,383 @@ function ease_out_circ(x) {
   return Math.sqrt(1 - Math.pow(x - 1, 2));
 }
 
-function mat4_target_to(eye, target, up=VEC3_UP) {
-  /**
-   * Generates a matrix that makes something look at something else.
-   *
-   * eye = Position of the viewer
-   * center = Point the viewer is looking at
-   * up = vec3 pointing up
-   * returns mat4 out
-   */
-  var eyex = eye[0],
-      eyey = eye[1],
-      eyez = eye[2],
-      upx = up[0],
-      upy = up[1],
-      upz = up[2];
-  var z0 = eyex - target[0],
-      z1 = eyey - target[1],
-      z2 = eyez - target[2];
-  var len = z0 * z0 + z1 * z1 + z2 * z2;
+function mat4_create() {
+  let out = new Float32Array(16);
+  out[0] = 1;
+  out[5] = 1;
+  out[10] = 1;
+  out[15] = 1;
+  return out;
+}
+function mat4_transpose(out, a) {
+  // If we are transposing ourselves we can skip a few steps but have to cache some values
+  if (out === a) {
+    let a01 = a[1],
+      a02 = a[2],
+      a03 = a[3];
+    let a12 = a[6],
+      a13 = a[7];
+    let a23 = a[11];
+    out[1] = a[4];
+    out[2] = a[8];
+    out[3] = a[12];
+    out[4] = a01;
+    out[6] = a[9];
+    out[7] = a[13];
+    out[8] = a02;
+    out[9] = a12;
+    out[11] = a[14];
+    out[12] = a03;
+    out[13] = a13;
+    out[14] = a23;
+  } else {
+    out[0] = a[0];
+    out[1] = a[4];
+    out[2] = a[8];
+    out[3] = a[12];
+    out[4] = a[1];
+    out[5] = a[5];
+    out[6] = a[9];
+    out[7] = a[13];
+    out[8] = a[2];
+    out[9] = a[6];
+    out[10] = a[10];
+    out[11] = a[14];
+    out[12] = a[3];
+    out[13] = a[7];
+    out[14] = a[11];
+    out[15] = a[15];
+  }
+  return out;
+}
+function mat4_invert(out, a) {
+  let a00 = a[0],
+    a01 = a[1],
+    a02 = a[2],
+    a03 = a[3];
+  let a10 = a[4],
+    a11 = a[5],
+    a12 = a[6],
+    a13 = a[7];
+  let a20 = a[8],
+    a21 = a[9],
+    a22 = a[10],
+    a23 = a[11];
+  let a30 = a[12],
+    a31 = a[13],
+    a32 = a[14],
+    a33 = a[15];
+  let b00 = a00 * a11 - a01 * a10;
+  let b01 = a00 * a12 - a02 * a10;
+  let b02 = a00 * a13 - a03 * a10;
+  let b03 = a01 * a12 - a02 * a11;
+  let b04 = a01 * a13 - a03 * a11;
+  let b05 = a02 * a13 - a03 * a12;
+  let b06 = a20 * a31 - a21 * a30;
+  let b07 = a20 * a32 - a22 * a30;
+  let b08 = a20 * a33 - a23 * a30;
+  let b09 = a21 * a32 - a22 * a31;
+  let b10 = a21 * a33 - a23 * a31;
+  let b11 = a22 * a33 - a23 * a32;
+  // Calculate the determinant
+  let det =
+    b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (!det) {
+    return null;
+  }
+  det = 1.0 / det;
+  out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
+  out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+  out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
+  out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
+  out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
+  out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+  out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
+  out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
+  out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
+  out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+  out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
+  out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
+  out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
+  out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
+  out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
+  out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
+  return out;
+}
+const _scratch = mat4_create();
+function mat4_from_zyx_rotation(out, x, y, z) {
+  mat4_from_z_rotation(out, z);
 
+  mat4_from_y_rotation(scratch, y);
+  mat4_mul(out, out, scratch);
+
+  mat4_from_x_rotation(scratch, x);
+  mat4_mul(out, out, scratch);
+
+  return out;
+}
+function mat4_from_x_rotation(out, rad) {
+  let s = Math.sin(rad);
+  let c = Math.cos(rad);
+  // Perform axis-specific matrix multiplication
+  out[0] = 1;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = c;
+  out[6] = s;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = -s;
+  out[10] = c;
+  out[11] = 0;
+  out[12] = 0;
+  out[13] = 0;
+  out[14] = 0;
+  out[15] = 1;
+  return out;
+}
+function mat4_from_y_rotation(out, rad) {
+  let s = Math.sin(rad);
+  let c = Math.cos(rad);
+  // Perform axis-specific matrix multiplication
+  out[0] = c;
+  out[1] = 0;
+  out[2] = -s;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = 1;
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = s;
+  out[9] = 0;
+  out[10] = c;
+  out[11] = 0;
+  out[12] = 0;
+  out[13] = 0;
+  out[14] = 0;
+  out[15] = 1;
+  return out;
+}
+function mat4_from_z_rotation(out, rad) {
+  let s = Math.sin(rad);
+  let c = Math.cos(rad);
+  // Perform axis-specific matrix multiplication
+  out[0] = c;
+  out[1] = s;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = -s;
+  out[5] = c;
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = 1;
+  out[11] = 0;
+  out[12] = 0;
+  out[13] = 0;
+  out[14] = 0;
+  out[15] = 1;
+  return out;
+}
+function mat4_from_translation(out, v) {
+  out[0] = 1;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = 1;
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = 1;
+  out[11] = 0;
+  out[12] = v[0];
+  out[13] = v[1];
+  out[14] = v[2];
+  out[15] = 1;
+  return out;
+}
+function mat4_from_scaling(out, v) {
+  out[0] = v[0];
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = v[1];
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = v[2];
+  out[11] = 0;
+  out[12] = 0;
+  out[13] = 0;
+  out[14] = 0;
+  out[15] = 1;
+  return out;
+}
+function mat4_mul(out, a, b) {
+  let a00 = a[0],
+    a01 = a[1],
+    a02 = a[2],
+    a03 = a[3];
+  let a10 = a[4],
+    a11 = a[5],
+    a12 = a[6],
+    a13 = a[7];
+  let a20 = a[8],
+    a21 = a[9],
+    a22 = a[10],
+    a23 = a[11];
+  let a30 = a[12],
+    a31 = a[13],
+    a32 = a[14],
+    a33 = a[15];
+  // Cache only the current line of the second matrix
+  let b0 = b[0],
+    b1 = b[1],
+    b2 = b[2],
+    b3 = b[3];
+  out[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  b0 = b[4];
+  b1 = b[5];
+  b2 = b[6];
+  b3 = b[7];
+  out[4] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[5] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[6] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[7] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  b0 = b[8];
+  b1 = b[9];
+  b2 = b[10];
+  b3 = b[11];
+  out[8] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[9] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[10] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[11] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  b0 = b[12];
+  b1 = b[13];
+  b2 = b[14];
+  b3 = b[15];
+  out[12] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[13] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  return out;
+}
+function mat4_target_to(out, eye, target, up=VEC3_UP) {
+  let eyex = eye[0],
+    eyey = eye[1],
+    eyez = eye[2],
+    upx = up[0],
+    upy = up[1],
+    upz = up[2];
+  let z0 = eyex - target[0],
+    z1 = eyey - target[1],
+    z2 = eyez - target[2];
+  let len = z0 * z0 + z1 * z1 + z2 * z2;
   if (len > 0) {
     len = 1 / Math.sqrt(len);
     z0 *= len;
     z1 *= len;
     z2 *= len;
   }
-
-  var x0 = upy * z2 - upz * z1,
-      x1 = upz * z0 - upx * z2,
-      x2 = upx * z1 - upy * z0;
+  let x0 = upy * z2 - upz * z1,
+    x1 = upz * z0 - upx * z2,
+    x2 = upx * z1 - upy * z0;
   len = x0 * x0 + x1 * x1 + x2 * x2;
-
   if (len > 0) {
     len = 1 / Math.sqrt(len);
     x0 *= len;
     x1 *= len;
     x2 *= len;
   }
-
-  const out = new DOMMatrix();
-  out.m11 = x0;
-  out.m12 = x1;
-  out.m13 = x2;
-  out.m14 = 0;
-  out.m21 = z1 * x2 - z2 * x1;
-  out.m22 = z2 * x0 - z0 * x2;
-  out.m23 = z0 * x1 - z1 * x0;
-  out.m24 = 0;
-  out.m31 = z0;
-  out.m32 = z1;
-  out.m33 = z2;
-  out.m34 = 0;
-  out.m41 = eyex;
-  out.m42 = eyey;
-  out.m43 = eyez;
-  out.m44 = 1;
+  out[0] = x0;
+  out[1] = x1;
+  out[2] = x2;
+  out[3] = 0;
+  out[4] = z1 * x2 - z2 * x1;
+  out[5] = z2 * x0 - z0 * x2;
+  out[6] = z0 * x1 - z1 * x0;
+  out[7] = 0;
+  out[8] = z0;
+  out[9] = z1;
+  out[10] = z2;
+  out[11] = 0;
+  out[12] = eyex;
+  out[13] = eyey;
+  out[14] = eyez;
+  out[15] = 1;
   return out;
 }
-function mat4_perspective(fovy, aspect, near, far) {
-  const out = new DOMMatrix();
-  const f = 1.0 / Math.tan(fovy / 2);
-  out.m11 = f / aspect;
-  out.m12 = 0;
-  out.m13 = 0;
-  out.m14 = 0;
-  out.m21 = 0;
-  out.m22 = f;
-  out.m23 = 0;
-  out.m24 = 0;
-  out.m31 = 0;
-  out.m32 = 0;
-  out.m34 = -1;
-  out.m41 = 0;
-  out.m42 = 0;
-  out.m44 = 0;
-
-
+function mat4_transform_vec4(out, a, m) {
+  let x = a[0],
+    y = a[1],
+    z = a[2],
+    w = a[3];
+  out[0] = m[0] * x + m[4] * y + m[8] * z + m[12] * w;
+  out[1] = m[1] * x + m[5] * y + m[9] * z + m[13] * w;
+  out[2] = m[2] * x + m[6] * y + m[10] * z + m[14] * w;
+  out[3] = m[3] * x + m[7] * y + m[11] * z + m[15] * w;
+  return out;
+}
+function mat4_perspective(out, fovy, aspect, near, far) {
+  let f = 1.0 / Math.tan(fovy / 2),
+    nf;
+  out[0] = f / aspect;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = f;
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = 0;
+  out[11] = -1;
+  out[12] = 0;
+  out[13] = 0;
+  out[15] = 0;
   if (far != null && far !== Infinity) {
-    const nf = 1 / (near - far);
-    out.m33 = (far + near) * nf;
-    out.m43 = 2 * far * near * nf;
+    nf = 1 / (near - far);
+    out[10] = (far + near) * nf;
+    out[14] = 2 * far * near * nf;
   } else {
-    out.m33 = -1;
-    out.m43 = -2 * near;
+    out[10] = -1;
+    out[14] = -2 * near;
   }
-
   return out;
 }
+function mat4_ortho(out, left, right, bottom, top, near, far) {
+  let lr = 1 / (left - right);
+  let bt = 1 / (bottom - top);
+  let nf = 1 / (near - far);
+  out[0] = -2 * lr;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = -2 * bt;
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = 2 * nf;
+  out[11] = 0;
+  out[12] = (left + right) * lr;
+  out[13] = (top + bottom) * bt;
+  out[14] = (far + near) * nf;
+  out[15] = 1;
+  return out;
+}
+
 
 
 function cross3(x, y) {
@@ -187,22 +476,25 @@ function ray_to_plane(p, v, n, d) {
 }
 
 let state = {
-  pos: [0, 2, 6],
-  inventory: [],
+  pos: [0, 1, 6],
+  inv: {
+    items: [...Array(9)].fill(0),
+    held_i: 0,
+  },
   items: [
-    { pos: [3.0, 1.8, 3], tex: 5 },
-    { pos: [4.5, 1.8, 3], tex: 4 },
-    { pos: [6.0, 1.8, 3], tex: 3 },
+    { pos: [2.5, 1.2, 3.5], tex: 5 },
+    { pos: [4.5, 1.2, 3.5], tex: 4 },
+    { pos: [6.5, 1.2, 3.5], tex: 3 },
   ],
   map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
-  cam: { yaw_deg: 0, pitch_deg: 0 },
+  cam: { yaw_deg: 130, pitch_deg: -20 },
   keysdown: {},
   mousedown: 0,
   mining: { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() },
 };
 for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
   for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
-    const t_y = 1;
+    const t_y = 0;
     state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = 1;
   }
 function ray_to_map(ray_origin, ray_direction) {
@@ -273,7 +565,8 @@ window.onmousedown = e => {
   if (!document.pointerLockElement) return;
   if (e.button == 0) state.mousedown = 1;
 
-  if (e.button == 2 && state.inventory.length) {
+  const i = state.inv;
+  if (e.button == 2 && i.items[i.held_i]) {
     e.preventDefault();
 
     const cast = ray_to_map(cam_eye(), cam_looking());
@@ -283,7 +576,8 @@ window.onmousedown = e => {
       p[cast.side] -= cast.dir;
       const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
 
-      state.map[index] = state.inventory.pop().tex;
+      state.map[index] = i.items[i.held_i].tex;
+      i.items[i.held_i] = 0;
     }
   }
 }
@@ -300,7 +594,12 @@ window.onmousemove = e => {
   state.cam.pitch_deg = Math.max(-89, Math.min(89, state.cam.pitch_deg - dy));
   state.cam.yaw_deg = (state.cam.yaw_deg - dx) % 360;
 };
-window.onkeydown = e => state.keysdown[e.code] = 1;
+window.onkeydown = e => {
+  state.keysdown[e.code] = 1;
+
+  const digit = parseInt(e.code['Digit'.length]);
+  if (digit) state.inv.held_i = digit-1;
+}
 window.onkeyup   = e => state.keysdown[e.code] = 0;
 function cam_eye() {
   return add3(state.pos, mul3_f(VEC3_UP, 1.8));
@@ -318,6 +617,28 @@ function cam_looking() {
   ];
   return looking;
 }
+function cam_view_proj(canvas) {
+  const proj = mat4_create();
+
+  if (0)
+    mat4_ortho(proj, -5.0, 5.0, -5.0, 5.0, -1.0, 100);
+
+  if (1) mat4_perspective(
+    proj,
+    45 / 180 * Math.PI,
+    canvas.clientWidth / canvas.clientHeight,
+    0.1,
+    100
+  );
+
+  const eye = cam_eye();
+  const view = mat4_create();
+  mat4_target_to(view, eye, add3(cam_looking(), eye));
+  mat4_invert(view, view);
+
+  mat4_mul(proj, proj, view);
+  return proj;
+}
 
 function draw_scene(gl, program_info, geo) {
   gl.enable(gl.DEPTH_TEST);
@@ -330,55 +651,30 @@ function draw_scene(gl, program_info, geo) {
   gl.clearDepth(1.0);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  const side = cross3(VEC3_UP, cam_looking());
-  const fwd = cam_looking();
-  fwd[1] = 0;
-  norm(fwd);
+  const fwd = cam_looking(); fwd[1] = 0; norm(fwd);
+  const side = cross3(VEC3_UP, fwd);
   if (state.keysdown['KeyW']) state.pos = add3(state.pos, mul3_f( fwd,  0.1));
   if (state.keysdown['KeyS']) state.pos = add3(state.pos, mul3_f( fwd, -0.1));
   if (state.keysdown['KeyA']) state.pos = add3(state.pos, mul3_f(side,  0.1));
   if (state.keysdown['KeyD']) state.pos = add3(state.pos, mul3_f(side, -0.1));
 
   state.items = state.items.filter(item => {
-    if (mag3(sub3(item.pos, state.pos)) < 0.8) {
-      state.inventory.push(item);
+    if (mag3(sub3(item.pos, state.pos)) < 1.5) {
+
+      /* find place for item in inventory */
+      for (const i in state.inv.items) {
+        if (!state.inv.items[i]) {
+          state.inv.items[i] = item;
+          break;
+        }
+      }
+
       return false;
     }
     return true;
   });
 
-  const cast = ray_to_map(cam_eye(), cam_looking());
-  if (cast.coord && cast.coord+'' == state.mining.block_coord+'') {
-    if (state.mining.ts_end < Date.now()) {
-      const p = [...state.mining.block_coord];
-      const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
-      state.items.push({ pos: [p[0], p[1] - 0.2, p[2]], tex: state.map[index] });
-      state.map[index] = 0;
-    }
-  } else {
-    state.mining = { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() };
-  }
-  {
-    const { block_coord, ts_end } = state.mining;
-    if (state.mousedown && (block_coord == undefined || ts_end < Date.now())) {
-      state.mining.block_coord = cast.coord;
-      state.mining.ts_start = Date.now();
-      state.mining.ts_end = Date.now() + 850;
-    }
-  }
-
-  const fieldOfView = (45 * Math.PI) / 180;
-  const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-  const zNear = 0.1;
-  const zFar = 100.0;
-  const projectionMatrix = mat4_perspective(fieldOfView, aspect, zNear, zFar);
-  const eye = cam_eye();
-  const viewMatrix = mat4_target_to(eye, add3(cam_looking(), eye), VEC3_UP);
-  const viewProjectionMatrix = projectionMatrix.multiply(viewMatrix.inverse());
-  // const viewProjectionMatrix = viewMatrix.multiply(projectionMatrix);
-  // const viewProjectionMatrix = projectionMatrix;
-
-  const modelViewMatrix = new DOMMatrix();
+  const u_view_proj = mat4_create();// cam_view_proj(gl.canvas);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
   {
@@ -395,11 +691,11 @@ function draw_scene(gl, program_info, geo) {
   {
     gl.vertexAttribPointer(
       /* index         */ program_info.attribLocations.a_tex_i,
-      /* numComponents */ 2,
+      /* numComponents */ 3,
       /* type          */ gl.UNSIGNED_BYTE,
       /* normalize     */ false,
       /* stride        */ VERT_FLOATS * Float32Array.BYTES_PER_ELEMENT,
-      /* offset        */           3 * Float32Array.BYTES_PER_ELEMENT,
+      /* offset        */           4 * Float32Array.BYTES_PER_ELEMENT,
     );
     gl.enableVertexAttribArray(program_info.attribLocations.a_tex_i);
   }
@@ -408,21 +704,10 @@ function draw_scene(gl, program_info, geo) {
   gl.useProgram(program_info.program);
 
   // Set the shader uniforms
-  const mat_to_arr = mat => [
-    mat.m11, mat.m12, mat.m13, mat.m14,
-    mat.m21, mat.m22, mat.m23, mat.m24,
-    mat.m31, mat.m32, mat.m33, mat.m34,
-    mat.m41, mat.m42, mat.m43, mat.m44 
-  ];
   gl.uniformMatrix4fv(
-    program_info.uniformLocations.viewProjectionMatrix,
+    program_info.uniform_locations.u_view_proj,
     false,
-    mat_to_arr(viewProjectionMatrix)
-  );
-  gl.uniformMatrix4fv(
-    program_info.uniformLocations.modelViewMatrix,
-    false,
-    mat_to_arr(modelViewMatrix)
+    u_view_proj
   );
 
   {
@@ -434,23 +719,30 @@ function draw_scene(gl, program_info, geo) {
 
 function init_shader_program(gl) {
   const vsSource = `
-    attribute vec3 a_vpos;
-    attribute vec2 a_tex_i;
+    attribute vec4 a_vpos;
+    attribute vec3 a_tex_i;
 
-    uniform mat4 u_mvp;
-    uniform mat4 u_proj;
+    uniform mat4 u_view_proj;
 
     varying lowp vec4 v_color;
     varying lowp vec2 v_texcoord;
 
     void main(void) {
-      gl_Position = u_proj * u_mvp * vec4(a_vpos.x, a_vpos.y, a_vpos.z, 1.0);
+      gl_Position = u_view_proj * a_vpos;
       v_texcoord.x =   mod(a_tex_i.x , 15.0) / 16.0;
       v_texcoord.y = floor(a_tex_i.x / 15.0) / 16.0;
       if (a_tex_i.y == 2.0)
         v_color = vec4(vec3(0.6)*0.35, 0.35);
-      else
+      else if (a_tex_i.y == 3.0) {
+        v_color = vec4(0.6);
+        gl_Position.z -= 0.001;
+      } else
         v_color = mix(vec4(1.0), vec4(0.48, 0.65, 0.4, 1), a_tex_i.y);
+
+      if (a_tex_i.z != 0.0)
+        v_color.x -= 0.2,
+        v_color.y -= 0.2,
+        v_color.z -= 0.2;
     }
   `;
   const fsSource = `
@@ -557,7 +849,7 @@ async function ss_sprite(gl) {
 
 (async () => {
   const canvas = document.getElementById("p1");
-  const gl = canvas.getContext("webgl");
+  const gl = canvas.getContext("webgl", { antialias: false });
 
   if (gl === null) alert(
     "Unable to initialize WebGL. Your browser or machine may not support it."
@@ -571,12 +863,8 @@ async function ss_sprite(gl) {
       a_vpos: gl.getAttribLocation(shader_program, "a_vpos"),
       a_tex_i: gl.getAttribLocation(shader_program, "a_tex_i"),
     },
-    uniformLocations: {
-      viewProjectionMatrix: gl.getUniformLocation(
-        shader_program,
-        "u_proj"
-      ),
-      modelViewMatrix: gl.getUniformLocation(shader_program, "u_mvp"),
+    uniform_locations: {
+      u_view_proj: gl.getUniformLocation(shader_program, "u_view_proj"),
     },
   };
 
@@ -627,26 +915,103 @@ async function ss_sprite(gl) {
       let vrt_i = 0;
       let idx_i = 0;
 
-      const ident = new DOMMatrix();
+      const default_mat = mat4_from_translation(mat4_create(), [0.5, 0.5, 0.5]);
+      const default_view_proj = cam_view_proj(gl.canvas);
       function place_cube(t_x, t_y, t_z, tex_offset, opts={}) {
         const tile_idx_i = vrt_i / VERT_FLOATS;
 
         const positions = new Float32Array([
           0, 0, 1,   1, 0, 1,   1, 1, 1,   0, 1, 1, // Front face
-          0, 0, 0,   0, 1, 0,   1, 1, 0,   1, 0, 0, // Back face
           0, 1, 0,   0, 1, 1,   1, 1, 1,   1, 1, 0, // Top face
-          0, 0, 0,   1, 0, 0,   1, 0, 1,   0, 0, 1, // Bottom face
           1, 0, 0,   1, 1, 0,   1, 1, 1,   1, 0, 1, // Right face
+          0, 0, 0,   0, 1, 0,   1, 1, 0,   1, 0, 0, // Back face
+          0, 0, 0,   1, 0, 0,   1, 0, 1,   0, 0, 1, // Bottom face
           0, 0, 0,   0, 0, 1,   0, 1, 1,   0, 1, 0, // Left face
         ]);
         for (let i = 0; i < positions.length; i += 3) {
           const x = positions[i + 0] - 0.5;
           const y = positions[i + 1] - 0.5;
           const z = positions[i + 2] - 0.5;
-          const p = new DOMPoint(x, y, z).matrixTransform(opts.mat ?? ident);
-          geo.cpu_position[vrt_i++] = p.x + 0.5 + t_x;
-          geo.cpu_position[vrt_i++] = p.y + 0.5 + t_y;
-          geo.cpu_position[vrt_i++] = p.z + 0.5 + t_z;
+          const p = [x, y, z, 1];
+          mat4_transform_vec4(p, p, opts.mat ?? default_mat);
+
+          const q = [p[0] + t_x, p[1] + t_y, p[2] + t_z, 1];
+          mat4_transform_vec4(q, q, opts.view_proj ?? default_view_proj);
+
+          geo.cpu_position[vrt_i++] = q[0];
+          geo.cpu_position[vrt_i++] = q[1];
+          geo.cpu_position[vrt_i++] = q[2];
+          geo.cpu_position[vrt_i++] = q[3];
+
+          const u8_cast = new Uint8Array(
+            geo.cpu_position.buffer,
+            Float32Array.BYTES_PER_ELEMENT * vrt_i++
+          );
+
+          if ((i/3)%4 == 0) u8_cast[0] = tex_offset +  0 + 0;
+          if ((i/3)%4 == 1) u8_cast[0] = tex_offset +  0 + 1;
+          if ((i/3)%4 == 2) u8_cast[0] = tex_offset + 15 + 1;
+          if ((i/3)%4 == 3) u8_cast[0] = tex_offset + 15 + 0;
+
+          u8_cast[1] = 0;
+          if (tex_offset == 0)     u8_cast[1] = 1;
+          if (opts.transparent)    u8_cast[1] = 2;
+          if (tex_offset >= 15*15) u8_cast[1] = 3;
+
+          u8_cast[2] = opts.darken ?? (i >= positions.length/2);
+        }
+
+        for (const i_o of [
+           0,  1,  2,  0,  2,  3, // front
+           4,  5,  6,  4,  6,  7, // back
+           8,  9, 10,  8, 10, 11, // top
+          12, 13, 14, 12, 14, 15, // bottom
+          16, 17, 18, 16, 18, 19, // right
+          20, 21, 22, 20, 22, 23, // left
+        ])
+          geo.cpu_indices[idx_i++] = tile_idx_i+i_o;
+      }
+
+      /* show item in hand */
+      if (state.inv.items[state.inv.held_i]) {
+        const proj = mat4_create();
+        const aspect = canvas.clientWidth / canvas.clientHeight;
+        mat4_perspective(
+          proj,
+          45 / 180 * Math.PI,
+          aspect,
+          0.18,
+          100
+        );
+        const view_proj = proj;
+
+        const mat = mat4_from_translation(mat4_create(), [aspect*0.85, -0.9, -3]);
+        mat4_mul(mat, mat, mat4_from_y_rotation(_scratch, 40 / 180 * Math.PI));
+        mat4_mul(mat, mat, mat4_from_scaling(_scratch, [0.7, 0.7, 0.7]));
+
+        const i = state.inv;
+        place_cube(0, 0, 0, i.items[i.held_i].tex-1, { no_view_proj: 1, mat, view_proj });
+      }
+
+      function place_quad(ortho, quad_x, quad_y, quad_w, quad_h, tex_offset, opts={}) {
+        const tile_idx_i = vrt_i / VERT_FLOATS;
+
+        const positions = new Float32Array([
+          0, 0, 1,   1, 0, 1,   1, 1, 1,   0, 1, 1, // Front face
+        ]);
+        for (let i = 0; i < positions.length; i += 3) {
+          const x = positions[i + 0]*quad_w + quad_x;
+          const y = positions[i + 1]*quad_h + quad_y;
+          const z = positions[i + 2];
+          const p = [x, y, z, 1];
+          // mat4_from_translation(_scratch, [0, 0, 0]);
+
+          mat4_transform_vec4(p, p, ortho);
+
+          geo.cpu_position[vrt_i++] = p[0];
+          geo.cpu_position[vrt_i++] = p[1];
+          geo.cpu_position[vrt_i++] = 0.85;
+          geo.cpu_position[vrt_i++] = 1.00;
 
           const u8_cast = new Uint8Array(
             geo.cpu_position.buffer,
@@ -661,17 +1026,46 @@ async function ss_sprite(gl) {
           u8_cast[1] = 0;
           if (tex_offset == 0)     u8_cast[1] = 1;
           if (opts.transparent || tex_offset >= 15*15) u8_cast[1] = 2;
+
+          u8_cast[2] = opts.darken ?? 0;
         }
 
         for (const i_o of [
            0,  1,  2,  0,  2,  3, // front
-           4,  5,  6,  4,  6,  7, // back
-           8,  9, 10,  8, 10, 11, // top
-          12, 13, 14, 12, 14, 15, // bottom
-          16, 17, 18, 16, 18, 19, // right
-          20, 21, 22, 20, 22, 23, // left
         ])
           geo.cpu_indices[idx_i++] = tile_idx_i+i_o;
+      }
+
+      /* update mining (removing/changing block as necessary) */
+      const cast = ray_to_map(cam_eye(), cam_looking());
+      if (cast.coord && cast.coord+'' == state.mining.block_coord+'') {
+        if (state.mining.ts_end < Date.now()) {
+          const p = [...state.mining.block_coord];
+          const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+          state.items.push({ pos: add3(p, [0.5, 0.2, 0.5]), tex: state.map[index] });
+          state.map[index] = 0;
+        }
+      } else {
+        state.mining = { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() };
+      }
+      {
+        const { block_coord, ts_end } = state.mining;
+        if (state.mousedown && (block_coord == undefined || ts_end < Date.now())) {
+          state.mining.block_coord = cast.coord;
+          state.mining.ts_start = Date.now();
+          state.mining.ts_end = Date.now() + 850;
+        }
+      }
+
+      /* removing block being mined before rendering map */
+      let mining_index = undefined;
+      let mining_block_type = undefined;
+      if (state.mining.block_coord) {
+        const p = state.mining.block_coord;
+        mining_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+
+        mining_block_type = state.map[mining_index];
+        state.map[mining_index] = 0;
       }
 
       for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
@@ -679,19 +1073,22 @@ async function ss_sprite(gl) {
           for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
             const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
             let draw = state.map[index];
-
             if (draw) place_cube(t_x, t_y, t_z, draw-1);
           }
-      place_cube(Math.floor(state.pos[0]),
-                 Math.floor(state.pos[1]) - 1,
-                 Math.floor(state.pos[2]), 2);
+      /* undo "removing block being mined before rendering map" */
+      if (mining_index)
+        state.map[mining_index] = mining_block_type;
 
-      const cast = ray_to_map(cam_eye(), cam_looking());
-      if (cast.coord && state.mining.block_coord) {
+      /* render block being mined with animation */
+      if (mining_index && mining_block_type) {
         let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
+        t = Math.min(1, t);
         t = ease_out_sine(t);
-        place_cube(...cast.coord, 15*15 + Math.floor(lerp(0, 10, t)));
+        if (t < 0.96) place_cube(...state.mining.block_coord, mining_block_type-1);
+        place_cube(...state.mining.block_coord, 15*15 + Math.floor(lerp(0, 9, t)));
       }
+
+      /* render indicator of what block you are looking at */
       if (cast.index != undefined                  &&
           cast.index <  MAP_SIZE*MAP_SIZE*MAP_SIZE &&
           cast.index >= 0                            
@@ -702,15 +1099,57 @@ async function ss_sprite(gl) {
 
         const scale = [1, 1, 1];
         scale[cast.side] = 0.004;
-        const mat = new DOMMatrix().scale(...scale);
-        place_cube(...p, 3*15 + 1, { mat, transparent: 1 });
+        const mat = mat4_from_translation(mat4_create(), [0.5, 0.5, 0.5]);
+        mat[0]  = scale[0];
+        mat[5]  = scale[1];
+        mat[10] = scale[2];
+        place_cube(...p, 3*15 + 1, { darken: 0, mat, transparent: 1 });
       }
       
       for (const { pos, tex } of state.items) {
-        const mat = new DOMMatrix()
-          .rotate(0, Date.now()/100, 0)
-          .scale(0.3, 0.3, 0.3);
+        const mat = mat4_from_y_rotation(mat4_create(), Date.now()/1000);
+        mat4_mul(mat, mat, mat4_from_scaling(mat4_create(), [0.3, 0.3, 0.3]));
         place_cube(...pos, tex-1, { mat });
+      }
+
+      place_cube(Math.floor(state.pos[0]),
+                 Math.floor(state.pos[1]) - 1,
+                 Math.floor(state.pos[2]), 2);
+
+      const min = Math.min(canvas.height, canvas.width);
+      const w = canvas.width  / min;
+      const h = canvas.height / min;
+      const view_proj = mat4_create();
+      mat4_ortho(
+        view_proj,
+        (w - 1)/-2, w - (w - 1)/2,
+        (h - 1)/-2, h - (h - 1)/2,
+        0, 1
+      );
+
+      const ui_cube = (x, y, tex) => {
+        const mat       = mat4_create();
+        mat4_mul(mat, mat, mat4_from_translation(_scratch, [x + 0.05, 0.05, -0.9]));
+        mat4_mul(mat, mat, mat4_from_scaling    (_scratch, [    0.05, 0.05, 0.05]));
+        mat4_mul(mat, mat, mat4_from_x_rotation (_scratch, Math.PI/5));
+        mat4_mul(mat, mat, mat4_from_y_rotation (_scratch, Math.PI/4));
+        place_cube(0, 0, 0, tex-1, { view_proj, mat });
+      }
+
+      for (let i = 0; i < 9; i++) {
+        const size = 1/10;
+        const border = 1/9*1/16;
+
+        const width = 9*(size - border);
+        const pad = (1 - width)/2;
+
+        const x = pad + (size - border)*i;
+        const transparent = i != (state.inv.held_i);
+        const darken = !transparent;
+        place_quad(view_proj, x, 0, size, size, 3*15 + 1, { transparent, darken });
+        if (state.inv.items[i]) {
+          ui_cube(x, 0, state.inv.items[i].tex);
+        }
       }
 
       // Create a buffer for the square's positions.
