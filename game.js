@@ -497,9 +497,9 @@ let state = {
     held_i: 0,
   },
   items: [
-    { pos: [2.5, 1.2, 3.5], id: ID_BLOCK_WOOD  },
-    { pos: [4.5, 1.2, 3.5], id: ID_BLOCK_GRASS },
-    { pos: [6.5, 1.2, 3.5], id: ID_BLOCK_DIRT  },
+    { pos: [2.5, 1.2, 3.5], id: ID_BLOCK_WOOD , amount: 1 },
+    { pos: [4.5, 1.2, 3.5], id: ID_BLOCK_GRASS, amount: 1 },
+    { pos: [6.5, 1.2, 3.5], id: ID_BLOCK_DIRT , amount: 1 },
   ],
   map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
   cam: { yaw_deg: 130, pitch_deg: -20 },
@@ -507,7 +507,8 @@ let state = {
   mousedown: 0,
   mining: { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() },
 };
-state.inv.items[0] = { id: ID_ITEM_BONEMEAL };
+state.inv.items[0] = { id: ID_ITEM_BONEMEAL, amount: 1 };
+state.inv.items[1] = { id: ID_BLOCK_LOG, amount: 1 };
 
 for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
   for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
@@ -603,7 +604,10 @@ window.onmousedown = e => {
 
       if (i.items[i.held_i].id <= ID_BLOCK_LAST) {
         state.map[index] = i.items[i.held_i].id;
-        i.items[i.held_i] = 0;
+
+        i.items[i.held_i].amount--;
+        if (i.items[i.held_i].amount == 0)
+          i.items[i.held_i] = 0;
       }
     }
   }
@@ -690,6 +694,10 @@ function draw_scene(gl, program_info, geo) {
 
       /* find place for item in inventory */
       for (const i in state.inv.items) {
+        if (state.inv.items[i].id == item.id) {
+          state.inv.items[i].amount += item.amount;
+          break;
+        }
         if (!state.inv.items[i]) {
           state.inv.items[i] = item;
           break;
@@ -700,8 +708,6 @@ function draw_scene(gl, program_info, geo) {
     }
     return true;
   });
-
-  const u_view_proj = mat4_create();// cam_view_proj(gl.canvas);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
   {
@@ -730,13 +736,6 @@ function draw_scene(gl, program_info, geo) {
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geo.gpu_indices);
   gl.useProgram(program_info.program);
 
-  // Set the shader uniforms
-  gl.uniformMatrix4fv(
-    program_info.uniform_locations.u_view_proj,
-    false,
-    u_view_proj
-  );
-
   {
     const type = gl.UNSIGNED_SHORT;
     const offset = 0;
@@ -749,13 +748,11 @@ function init_shader_program(gl) {
     attribute vec4 a_vpos;
     attribute vec2 a_tex_i;
 
-    uniform mat4 u_view_proj;
-
     varying lowp vec4 v_color;
     varying lowp vec2 v_texcoord;
 
     void main(void) {
-      gl_Position = u_view_proj * a_vpos;
+      gl_Position = a_vpos;
       v_texcoord.x =   mod(a_tex_i.x , ${SS_COLUMNS}.0) + mod(      a_tex_i.y , 2.0);
       v_texcoord.y = floor(a_tex_i.x / ${SS_COLUMNS}.0) + mod(floor(a_tex_i.y / 2.0), 2.0);
       v_texcoord /= ${SS_COLUMNS}.0;
@@ -870,9 +867,12 @@ async function ss_sprite(gl) {
   const terrain = new Image(); terrain.src = './terrain.png';
   const   items = new Image();   items.src = './items.png'  ;
   const    font = new Image();    font.src = './font.png'   ;
+  const     gui = new Image();     gui.src = './gui.png'    ;
   await Promise.all([
     new Promise(res => terrain.onload = res),
     new Promise(res =>   items.onload = res),
+    new Promise(res =>    font.onload = res),
+    new Promise(res =>     gui.onload = res),
   ]);
 
   if (spritesheet == undefined) {
@@ -922,9 +922,12 @@ async function ss_sprite(gl) {
   //   console.log(chr, letter_widths[chr.charCodeAt(0)]);
   // }
 
-  ss_ctx.drawImage(terrain,              0, 0, terrain.width, terrain.height);
-  ss_ctx.drawImage(  items, terrain. width, 0, terrain.width, terrain.height);
-  ss_ctx.drawImage(   font, 0, terrain.height, terrain.width, terrain.height);
+  const w = terrain. width;
+  const h = terrain.height;
+  ss_ctx.drawImage(terrain, 0, 0, terrain.width, terrain.height);
+  ss_ctx.drawImage(  items, w, 0, terrain.width, terrain.height);
+  ss_ctx.drawImage(   font, 0, h, terrain.width, terrain.height);
+  ss_ctx.drawImage(    gui, w, h, terrain.width, terrain.height);
   gl_upload_image(gl, spritesheet, 0);
 }
 
@@ -944,9 +947,7 @@ async function ss_sprite(gl) {
       a_vpos: gl.getAttribLocation(shader_program, "a_vpos"),
       a_tex_i: gl.getAttribLocation(shader_program, "a_tex_i"),
     },
-    uniform_locations: {
-      u_view_proj: gl.getUniformLocation(shader_program, "u_view_proj"),
-    },
+    uniform_locations: {},
   };
 
   // const img = new ImageData(256, 256);
@@ -1092,9 +1093,11 @@ async function ss_sprite(gl) {
       function place_ui_quad(ortho, quad_x, quad_y, quad_w, quad_h, tex_offset, opts={}) {
         const tile_idx_i = vrt_i / VERT_FLOATS;
 
-        const positions = new Float32Array([
-          0, 1, 1,   1, 1, 1,   1, 0, 1,   0, 0, 1,   // Front face
-        ]);
+        const positions = new Float32Array(   // Front face 
+          opts.tex_flip
+            ? [ 1, 0, 1,   0, 0, 1,   0, 1, 1,   1, 1, 1]
+            : [ 0, 1, 1,   1, 1, 1,   1, 0, 1,   0, 0, 1]
+        );
         for (let i = 0; i < positions.length; i += 3) {
           const x = positions[i + 0]*quad_w + quad_x;
           const y = positions[i + 1]*quad_h + quad_y;
@@ -1106,7 +1109,7 @@ async function ss_sprite(gl) {
 
           geo.cpu_position[vrt_i++] = p[0];
           geo.cpu_position[vrt_i++] = p[1];
-          geo.cpu_position[vrt_i++] = 0.85;
+          geo.cpu_position[vrt_i++] = opts.z ?? 0.85;
           geo.cpu_position[vrt_i++] = 1.00;
 
           const u16_cast = new Uint16Array(
@@ -1190,7 +1193,7 @@ async function ss_sprite(gl) {
         if (state.mining.ts_end < Date.now()) {
           const p = [...state.mining.block_coord];
           const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
-          state.items.push({ pos: add3(p, [0.5, 0.2, 0.5]), id: state.map[index] });
+          state.items.push({ pos: add3(p, [0.5, 0.2, 0.5]), id: state.map[index], amount: 1 });
           state.map[index] = 0;
         }
       } else {
@@ -1266,27 +1269,36 @@ async function ss_sprite(gl) {
                  Math.floor(state.pos[1]) - 1,
                  Math.floor(state.pos[2]), 2);
 
-      const min = Math.min(canvas.height, canvas.width);
-      const w = canvas.width  / min;
-      const h = canvas.height / min;
       const view_proj = mat4_create();
+      const hotbar_size = 45*4;
+      const offset = (hotbar_size-canvas.width/4)*0.5;// hotbar_size;
+      const ui_w = canvas.width /4;
+      const ui_h = canvas.height/4;
       mat4_ortho(
         view_proj,
-        (w - 1)/-2, w - (w - 1)/2,
-        (h - 1)/-2, h - (h - 1)/2,
+        offset + 0, offset + ui_w,
+                 0,          ui_h,
         0, 1
       );
 
       const ui_cube = (x, y, id) => {
         const mat       = mat4_create();
-        mat4_mul(mat, mat, mat4_from_translation(_scratch, [x + 0.05, 0.05, -0.9]));
-        mat4_mul(mat, mat, mat4_from_scaling    (_scratch, [    0.05, 0.05, 0.05]));
+        mat4_mul(mat, mat, mat4_from_translation(_scratch, [x + 8, y + 8, -0.00001]));
+        mat4_mul(mat, mat, mat4_from_scaling    (_scratch, [  9.5,   9.5,  0.00001]));
         mat4_mul(mat, mat, mat4_from_x_rotation (_scratch, Math.PI/5));
         mat4_mul(mat, mat, mat4_from_y_rotation (_scratch, Math.PI/4));
+
+        // const view_proj = mat4_create();
+        // mat4_ortho(
+        //   view_proj,
+        //   0, 1,
+        //   0, 1,
+        //   0, 1
+        // );
         place_block(0, 0, 0, id, { view_proj, mat });
       }
 
-      const ui_str = (str, x, y, size) => {
+      const ui_str = (str, x, y, size, opts={}) => {
         let cursor = 0;
         for (const i in str) {
           const chr = str[i];
@@ -1300,46 +1312,70 @@ async function ss_sprite(gl) {
             x + size*cursor, y,
             size, size,
             tex,
-            { transparent: 0, darken: 0 }
+            opts
           );
           cursor += letter_widths[code]/8;
         }
         return cursor;
       };
-      const size = Date.now()/20000 % 0.2;
-      ui_str("sup nerd", 0, 1 - size, size);
+
+      for (let i = 0; i < 11; i++) {
+        for (let _x = 0; _x < 2; _x++)
+          for (let _y = 0; _y < 2; _y++) {
+            const x = _x + i;
+            const size = 16;
+            const slot = (_y+16)*SS_COLUMNS + 16 + x;
+
+            place_ui_quad(view_proj, size*x, 7 - size*_y, size, size, slot);
+          }
+      }
 
       for (let i = 0; i < 9; i++) {
-        const size = 1/10;
-        const border = 1/9*1/16;
-
-        const width = 9*(size - border);
-        const pad = (1 - width)/2;
-
-        const x = pad + (size - border)*i;
-        const transparent = i != (state.inv.held_i);
-        const darken = !transparent;
-
-        const glass = 3*SS_COLUMNS + 1;
-        place_ui_quad(view_proj, x, 0, size, size, glass, { transparent, darken });
-        if (state.inv.items[i]) {
+        const item_tex = SS_COLUMNS*11 + 31;
+        const itm = state.inv.items[i];
+        if (itm) {
           const id = state.inv.items[i].id;
+
+          const x = 3 + i*20;
           if (id <= ID_BLOCK_LAST)
-            ui_cube(x, 0, id);
-          else {
-            const item_size = size * (12/16);
-            const item_pad = (size - item_size)/2;
-            place_ui_quad(
-              view_proj,
-              x + item_pad,
-              0 + item_pad,
-              item_size, item_size,
-              SS_COLUMNS*11 + 31,
-              { transparent, darken }
-            );
-          }
+            ui_cube(x, 4, id);
+          else
+            place_ui_quad(view_proj, x, 4, 16, 16, item_tex);
+
+          if (itm.amount > 1)
+            ui_str(""+itm.amount, x, 4, 8, { z: -1.0 });
         }
       }
+
+      {
+        for (let _x = 0; _x < 2; _x++)
+          for (let _y = 0; _y < 2; _y++) {
+            const x = _x;
+            const size = 16;
+            const slot = ((2-_y)+16)*SS_COLUMNS + 16 + (1-x);
+
+            const quad_x = size*x-9 + state.inv.held_i*20;
+            place_ui_quad(view_proj, quad_x, 10 - size*_y, size, size, slot, { tex_flip: 1 });
+          }
+      }
+
+        // if (state.inv.items[i]) {
+        //   const id = state.inv.items[i].id;
+        //   if (id <= ID_BLOCK_LAST)
+        //     ui_cube(x, 0, id);
+        //   else {
+        //     const item_size = size * (12/16);
+        //     const item_pad = (size - item_size)/2;
+        //     place_ui_quad(
+        //       view_proj,
+        //       x + item_pad,
+        //       0 + item_pad,
+        //       item_size, item_size,
+        //       SS_COLUMNS*11 + 31,
+        //       { transparent, darken }
+        //     );
+        //   }
+        // }
 
       // Create a buffer for the square's positions.
       gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
