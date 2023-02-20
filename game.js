@@ -475,6 +475,16 @@ function ray_to_plane(p, v, n, d) {
   return add3(p, mul3_f(v, t));
 }
 
+let _id = 0;
+const ID_BLOCK_NONE     = _id++;
+const ID_BLOCK_DIRT     = _id++;
+const ID_BLOCK_WOOD     = _id++;
+const ID_BLOCK_GRASS    = _id++;
+const ID_BLOCK_GLASS    = _id++;
+const ID_BLOCK_SAPLING  = _id++;
+const ID_BLOCK_LOG      = _id++;
+const ID_BLOCK_BREAKING = _id; _id += 10;
+
 let state = {
   pos: [0, 1, 6],
   inv: {
@@ -482,9 +492,9 @@ let state = {
     held_i: 0,
   },
   items: [
-    { pos: [2.5, 1.2, 3.5], tex: 5 },
-    { pos: [4.5, 1.2, 3.5], tex: 4 },
-    { pos: [6.5, 1.2, 3.5], tex: 3 },
+    { pos: [2.5, 1.2, 3.5], id: ID_BLOCK_WOOD  },
+    { pos: [4.5, 1.2, 3.5], id: ID_BLOCK_GRASS },
+    { pos: [6.5, 1.2, 3.5], id: ID_BLOCK_DIRT  },
   ],
   map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
   cam: { yaw_deg: 130, pitch_deg: -20 },
@@ -495,8 +505,16 @@ let state = {
 for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
   for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
     const t_y = 0;
-    state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = 1;
+    state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = ID_BLOCK_GRASS;
   }
+{
+  let t_x = 3;
+  let t_y = 1;
+  let t_z = 1;
+  state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = ID_BLOCK_GRASS;
+  t_x += 2;
+  state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = ID_BLOCK_LOG;
+}
 function ray_to_map(ray_origin, ray_direction) {
   const ret = {
     impact: [0, 0, 0],
@@ -576,7 +594,7 @@ window.onmousedown = e => {
       p[cast.side] -= cast.dir;
       const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
 
-      state.map[index] = i.items[i.held_i].tex;
+      state.map[index] = i.items[i.held_i].id;
       i.items[i.held_i] = 0;
     }
   }
@@ -718,7 +736,7 @@ function draw_scene(gl, program_info, geo) {
 }
 
 function init_shader_program(gl) {
-  const vsSource = `
+  const vs_source = `
     attribute vec4 a_vpos;
     attribute vec3 a_tex_i;
 
@@ -729,23 +747,28 @@ function init_shader_program(gl) {
 
     void main(void) {
       gl_Position = u_view_proj * a_vpos;
-      v_texcoord.x =   mod(a_tex_i.x , 15.0) / 16.0;
-      v_texcoord.y = floor(a_tex_i.x / 15.0) / 16.0;
-      if (a_tex_i.y == 2.0)
-        v_color = vec4(vec3(0.6)*0.35, 0.35);
-      else if (a_tex_i.y == 3.0) {
-        v_color = vec4(0.6);
-        gl_Position.z -= 0.001;
-      } else
-        v_color = mix(vec4(1.0), vec4(0.48, 0.65, 0.4, 1), a_tex_i.y);
+      v_texcoord.x =   mod(a_tex_i.x , 16.0) +   mod(a_tex_i.y , 2.0);
+      v_texcoord.y = floor(a_tex_i.x / 16.0) + floor(a_tex_i.y / 2.0);
+      v_texcoord /= 16.0;
 
-      if (a_tex_i.z != 0.0)
+      v_color = vec4(1.0);
+      if (mod(a_tex_i.z, 2.0) == 1.0)
         v_color.x -= 0.2,
         v_color.y -= 0.2,
         v_color.z -= 0.2;
+      if (floor(a_tex_i.z / 2.0) == 1.0)
+        v_color.xyz = mix(
+          vec3(0.412, 0.765, 0.314),
+          vec3(0.196, 0.549, 0.235),
+          0.01
+        );
+      // if (mod(a_tex_i.z, 2.0) == 1.0) {
+      //   gl_Position.z -= 0.001;
+      // }
+
     }
   `;
-  const fsSource = `
+  const fs_source = `
     varying lowp vec4 v_color;
     varying lowp vec2 v_texcoord;
 
@@ -753,6 +776,7 @@ function init_shader_program(gl) {
 
     void main(void) {
       gl_FragColor = v_color * texture2D(u_tex, v_texcoord);
+      if (gl_FragColor.a == 0.0) discard;
     }
   `;
 
@@ -770,8 +794,8 @@ function init_shader_program(gl) {
     return shader;
   }
 
-  const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
-  const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+  const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vs_source);
+  const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fs_source);
 
   const shader_program = gl.createProgram();
   gl.attachShader(shader_program, vertexShader);
@@ -829,12 +853,16 @@ function gl_upload_image(gl, image, i) {
   gl.generateMipmap(gl.TEXTURE_2D);
 }
 
-const SPRITESHEET_SCALE = 1024;
+const SPRITESHEET_SCALE = 256;
 let spritesheet, ss_ctx;
 async function ss_sprite(gl) {
-  const img = new Image();
-  img.src = `./terrain.png`;
-  await new Promise(res => img.onload = res);
+
+  const terrain = new Image(); terrain.src = './terrain.png';
+  const   items = new Image();   items.src = './items.png'  ;
+  await Promise.all([
+    new Promise(res => terrain.onload = res),
+    new Promise(res =>   items.onload = res),
+  ]);
 
   if (spritesheet == undefined) {
     spritesheet = document.createElement("canvas");
@@ -842,8 +870,7 @@ async function ss_sprite(gl) {
     ss_ctx = spritesheet.getContext("2d");
   }
 
-  ss_ctx.drawImage(img, 0, 0, SPRITESHEET_SCALE, SPRITESHEET_SCALE);
-
+  ss_ctx.drawImage(terrain, 0, 0, SPRITESHEET_SCALE, SPRITESHEET_SCALE);
   gl_upload_image(gl, spritesheet, 0);
 }
 
@@ -917,18 +944,46 @@ async function ss_sprite(gl) {
 
       const default_mat = mat4_from_translation(mat4_create(), [0.5, 0.5, 0.5]);
       const default_view_proj = cam_view_proj(gl.canvas);
+      const models = {
+        cube: {
+          positions: new Float32Array([
+            1, 1, 1,   0, 1, 1,   0, 0, 1,   1, 0, 1,   // Front face
+            0, 1, 1,   1, 1, 1,   1, 1, 0,   0, 1, 0,   // Top face
+            1, 1, 0,   1, 1, 1,   1, 0, 1,   1, 0, 0,   // Right face
+            0, 1, 0,   1, 1, 0,   1, 0, 0,   0, 0, 0,   // Back face
+            1, 0, 0,   1, 0, 1,   0, 0, 1,   0, 0, 0,   // Bottom face
+            0, 1, 1,   0, 1, 0,   0, 0, 0,   0, 0, 1,   // Left face
+          ].map(x => lerp(-0.0012, 1.0012, x))),
+          // ]),
+          indices: [
+             0,  1,  2,  0,  2,  3, // front
+             4,  5,  6,  4,  6,  7, // back
+             8,  9, 10,  8, 10, 11, // top
+            12, 13, 14, 12, 14, 15, // bottom
+            16, 17, 18, 16, 18, 19, // right
+            20, 21, 22, 20, 22, 23, // left
+          ]
+        },
+        x: {
+          positions: new Float32Array([
+            1, 1, 0.5,   0, 1, 0.5,    0, 0, 0.5,  1, 0, 0.5,    // Front face
+            0.5, 1, 0,   0.5, 1, 1,   0.5, 0, 1,    0.5, 0, 0,   // Right face
+          ]),
+          indices: [
+             0,  1,  2,  0,  2,  3, // front
+             4,  5,  6,  4,  6,  7, // right
+          ]
+       }
+      };
       function place_cube(t_x, t_y, t_z, tex_offset, opts={}) {
+        const { positions, indices } = opts.model ?? models.cube;
         const tile_idx_i = vrt_i / VERT_FLOATS;
 
-        const positions = new Float32Array([
-          0, 0, 1,   1, 0, 1,   1, 1, 1,   0, 1, 1, // Front face
-          0, 1, 0,   0, 1, 1,   1, 1, 1,   1, 1, 0, // Top face
-          1, 0, 0,   1, 1, 0,   1, 1, 1,   1, 0, 1, // Right face
-          0, 0, 0,   0, 1, 0,   1, 1, 0,   1, 0, 0, // Back face
-          0, 0, 0,   1, 0, 0,   1, 0, 1,   0, 0, 1, // Bottom face
-          0, 0, 0,   0, 0, 1,   0, 1, 1,   0, 1, 0, // Left face
-        ]);
         for (let i = 0; i < positions.length; i += 3) {
+          const face_i = Math.floor(i/3/4);
+          const tex = tex_offset[face_i] ?? tex_offset;
+          if (tex == -1) continue;
+
           const x = positions[i + 0] - 0.5;
           const y = positions[i + 1] - 0.5;
           const z = positions[i + 2] - 0.5;
@@ -948,52 +1003,24 @@ async function ss_sprite(gl) {
             Float32Array.BYTES_PER_ELEMENT * vrt_i++
           );
 
-          if ((i/3)%4 == 0) u8_cast[0] = tex_offset +  0 + 0;
-          if ((i/3)%4 == 1) u8_cast[0] = tex_offset +  0 + 1;
-          if ((i/3)%4 == 2) u8_cast[0] = tex_offset + 15 + 1;
-          if ((i/3)%4 == 3) u8_cast[0] = tex_offset + 15 + 0;
+          u8_cast[0] = tex;
 
-          u8_cast[1] = 0;
-          if (tex_offset == 0)     u8_cast[1] = 1;
-          if (opts.transparent)    u8_cast[1] = 2;
-          if (tex_offset >= 15*15) u8_cast[1] = 3;
+          let corner_x, corner_y;
+          if ((i/3)%4 == 0) corner_x = 0, corner_y = 0;
+          if ((i/3)%4 == 1) corner_x = 1, corner_y = 0;
+          if ((i/3)%4 == 2) corner_x = 1, corner_y = 1;
+          if ((i/3)%4 == 3) corner_x = 0, corner_y = 1;
+          u8_cast[1] = corner_x | (corner_y << 1);
 
-          u8_cast[2] = opts.darken ?? (i >= positions.length/2);
+          const darken = opts.darken ?? (i >= positions.length/2);
+          const biomed = ((opts.biomed && opts.biomed[face_i]) ?? opts.biomed) ?? 0;
+          u8_cast[2] = darken | (biomed << 1);
         }
 
-        for (const i_o of [
-           0,  1,  2,  0,  2,  3, // front
-           4,  5,  6,  4,  6,  7, // back
-           8,  9, 10,  8, 10, 11, // top
-          12, 13, 14, 12, 14, 15, // bottom
-          16, 17, 18, 16, 18, 19, // right
-          20, 21, 22, 20, 22, 23, // left
-        ])
+        for (const i_o of indices)
           geo.cpu_indices[idx_i++] = tile_idx_i+i_o;
       }
-
-      /* show item in hand */
-      if (state.inv.items[state.inv.held_i]) {
-        const proj = mat4_create();
-        const aspect = canvas.clientWidth / canvas.clientHeight;
-        mat4_perspective(
-          proj,
-          45 / 180 * Math.PI,
-          aspect,
-          0.18,
-          100
-        );
-        const view_proj = proj;
-
-        const mat = mat4_from_translation(mat4_create(), [aspect*0.85, -0.9, -3]);
-        mat4_mul(mat, mat, mat4_from_y_rotation(_scratch, 40 / 180 * Math.PI));
-        mat4_mul(mat, mat, mat4_from_scaling(_scratch, [0.7, 0.7, 0.7]));
-
-        const i = state.inv;
-        place_cube(0, 0, 0, i.items[i.held_i].tex-1, { no_view_proj: 1, mat, view_proj });
-      }
-
-      function place_quad(ortho, quad_x, quad_y, quad_w, quad_h, tex_offset, opts={}) {
+      function place_ui_quad(ortho, quad_x, quad_y, quad_w, quad_h, tex_offset, opts={}) {
         const tile_idx_i = vrt_i / VERT_FLOATS;
 
         const positions = new Float32Array([
@@ -1018,15 +1045,13 @@ async function ss_sprite(gl) {
             Float32Array.BYTES_PER_ELEMENT * vrt_i++
           );
 
-          if ((i/3)%4 == 0) u8_cast[0] = tex_offset +  0 + 0;
-          if ((i/3)%4 == 1) u8_cast[0] = tex_offset +  0 + 1;
-          if ((i/3)%4 == 2) u8_cast[0] = tex_offset + 15 + 1;
-          if ((i/3)%4 == 3) u8_cast[0] = tex_offset + 15 + 0;
-
-          u8_cast[1] = 0;
-          if (tex_offset == 0)     u8_cast[1] = 1;
-          if (opts.transparent || tex_offset >= 15*15) u8_cast[1] = 2;
-
+          u8_cast[0] = tex_offset;
+          let corner_x, corner_y;
+          if ((i/3)%4 == 0) corner_x = 0, corner_y = 0;
+          if ((i/3)%4 == 1) corner_x = 1, corner_y = 0;
+          if ((i/3)%4 == 2) corner_x = 1, corner_y = 1;
+          if ((i/3)%4 == 3) corner_x = 0, corner_y = 1;
+          u8_cast[1] = corner_x | (corner_y << 1);
           u8_cast[2] = opts.darken ?? 0;
         }
 
@@ -1035,6 +1060,54 @@ async function ss_sprite(gl) {
         ])
           geo.cpu_indices[idx_i++] = tile_idx_i+i_o;
       }
+      function place_block(t_x, t_y, t_z, block_id, opts={}) {
+        const top_n_bottom = (_top, bottom) => [bottom, _top, bottom, bottom, bottom, bottom];
+
+        if (block_id == ID_BLOCK_SAPLING) {
+          opts.model = models.x;
+        }
+        if (block_id == ID_BLOCK_GRASS) {
+          opts.biomed = top_n_bottom(1, 0);
+        }
+
+        let tex_offset;
+        if (block_id == ID_BLOCK_WOOD     ) tex_offset = 4;
+        if (block_id == ID_BLOCK_GRASS    ) tex_offset = top_n_bottom(0, 2);
+        if (block_id == ID_BLOCK_DIRT     ) tex_offset = 2;
+        if (block_id == ID_BLOCK_GLASS    ) tex_offset = 3*16 + 1;
+        if (block_id == ID_BLOCK_SAPLING  ) tex_offset = 15;
+        if (block_id == ID_BLOCK_LOG      ) tex_offset = top_n_bottom(16*1 + 5, 16*1 + 4);
+        const bdelta = block_id - ID_BLOCK_BREAKING;
+        if (bdelta < 10 && bdelta >= 0) tex_offset = 16*15 + bdelta;
+
+        place_cube(t_x, t_y, t_z, tex_offset, opts);
+        if (block_id == ID_BLOCK_GRASS) {
+          opts.biomed = 1;
+          place_cube(t_x, t_y, t_z, top_n_bottom(-1, 16*2 + 6), opts);
+        }
+      }
+
+      /* show item in hand */
+      if (state.inv.items[state.inv.held_i]) {
+        const proj = mat4_create();
+        const aspect = canvas.clientWidth / canvas.clientHeight;
+        mat4_perspective(
+          proj,
+          45 / 180 * Math.PI,
+          aspect,
+          0.18,
+          100
+        );
+        const view_proj = proj;
+
+        const mat = mat4_from_translation(mat4_create(), [aspect*0.85, -0.9, -3]);
+        mat4_mul(mat, mat, mat4_from_y_rotation(_scratch, 40 / 180 * Math.PI));
+        mat4_mul(mat, mat, mat4_from_scaling(_scratch, [0.7, 0.7, 0.7]));
+
+        const i = state.inv;
+        place_block(0, 0, 0, i.items[i.held_i].id, { no_view_proj: 1, mat, view_proj });
+      }
+
 
       /* update mining (removing/changing block as necessary) */
       const cast = ray_to_map(cam_eye(), cam_looking());
@@ -1042,7 +1115,7 @@ async function ss_sprite(gl) {
         if (state.mining.ts_end < Date.now()) {
           const p = [...state.mining.block_coord];
           const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
-          state.items.push({ pos: add3(p, [0.5, 0.2, 0.5]), tex: state.map[index] });
+          state.items.push({ pos: add3(p, [0.5, 0.2, 0.5]), id: state.map[index] });
           state.map[index] = 0;
         }
       } else {
@@ -1072,8 +1145,8 @@ async function ss_sprite(gl) {
         for (let t_y = 0; t_y < MAP_SIZE; t_y++) 
           for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
             const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
-            let draw = state.map[index];
-            if (draw) place_cube(t_x, t_y, t_z, draw-1);
+            let block_id = state.map[index];
+            if (block_id != ID_BLOCK_NONE) place_block(t_x, t_y, t_z, block_id);
           }
       /* undo "removing block being mined before rendering map" */
       if (mining_index)
@@ -1084,14 +1157,16 @@ async function ss_sprite(gl) {
         let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
         t = Math.min(1, t);
         t = ease_out_sine(t);
-        if (t < 0.96) place_cube(...state.mining.block_coord, mining_block_type-1);
-        place_cube(...state.mining.block_coord, 15*15 + Math.floor(lerp(0, 9, t)));
+        if (t < 0.98) place_block(...state.mining.block_coord, mining_block_type);
+        const stage = Math.floor(lerp(0, 9, t));
+        place_block(...state.mining.block_coord, ID_BLOCK_BREAKING + stage);
       }
 
       /* render indicator of what block you are looking at */
       if (cast.index != undefined                  &&
           cast.index <  MAP_SIZE*MAP_SIZE*MAP_SIZE &&
-          cast.index >= 0                            
+          cast.index >= 0                          &&
+          !state.mousedown
       ) {
         const p = [...cast.coord];
         const thickness = 0.04;
@@ -1103,16 +1178,16 @@ async function ss_sprite(gl) {
         mat[0]  = scale[0];
         mat[5]  = scale[1];
         mat[10] = scale[2];
-        place_cube(...p, 3*15 + 1, { darken: 0, mat, transparent: 1 });
+        place_block(...p, ID_BLOCK_GLASS, { darken: 0, mat, transparent: 1 });
       }
       
-      for (const { pos, tex } of state.items) {
+      for (const { pos, id } of state.items) {
         const mat = mat4_from_y_rotation(mat4_create(), Date.now()/1000);
         mat4_mul(mat, mat, mat4_from_scaling(mat4_create(), [0.3, 0.3, 0.3]));
-        place_cube(...pos, tex-1, { mat });
+        place_block(...pos, id, { mat });
       }
 
-      place_cube(Math.floor(state.pos[0]),
+      place_block(Math.floor(state.pos[0]),
                  Math.floor(state.pos[1]) - 1,
                  Math.floor(state.pos[2]), 2);
 
@@ -1127,13 +1202,13 @@ async function ss_sprite(gl) {
         0, 1
       );
 
-      const ui_cube = (x, y, tex) => {
+      const ui_cube = (x, y, id) => {
         const mat       = mat4_create();
         mat4_mul(mat, mat, mat4_from_translation(_scratch, [x + 0.05, 0.05, -0.9]));
         mat4_mul(mat, mat, mat4_from_scaling    (_scratch, [    0.05, 0.05, 0.05]));
         mat4_mul(mat, mat, mat4_from_x_rotation (_scratch, Math.PI/5));
         mat4_mul(mat, mat, mat4_from_y_rotation (_scratch, Math.PI/4));
-        place_cube(0, 0, 0, tex-1, { view_proj, mat });
+        place_block(0, 0, 0, id, { view_proj, mat });
       }
 
       for (let i = 0; i < 9; i++) {
@@ -1146,9 +1221,9 @@ async function ss_sprite(gl) {
         const x = pad + (size - border)*i;
         const transparent = i != (state.inv.held_i);
         const darken = !transparent;
-        place_quad(view_proj, x, 0, size, size, 3*15 + 1, { transparent, darken });
+        place_ui_quad(view_proj, x, 0, size, size, 3*16 + 1, { transparent, darken });
         if (state.inv.items[i]) {
-          ui_cube(x, 0, state.inv.items[i].tex);
+          ui_cube(x, 0, state.inv.items[i].id);
         }
       }
 
