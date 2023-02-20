@@ -43,6 +43,7 @@ const log = x => (console.log(x), x);
 const VEC3_UP = [0, 1, 0];
 const MAP_SIZE = 8;
 const VERT_FLOATS = 5;
+const SS_COLUMNS = 32;
 
 function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
 function inv_lerp(min, max, p) { return (((p) - (min)) / ((max) - (min))); }
@@ -483,7 +484,11 @@ const ID_BLOCK_GRASS    = _id++;
 const ID_BLOCK_GLASS    = _id++;
 const ID_BLOCK_SAPLING  = _id++;
 const ID_BLOCK_LOG      = _id++;
+const ID_BLOCK_LEAVES   = _id++;
 const ID_BLOCK_BREAKING = _id; _id += 10;
+const ID_BLOCK_LAST = _id-1;
+
+const ID_ITEM_BONEMEAL  = _id++;
 
 let state = {
   pos: [0, 1, 6],
@@ -502,6 +507,8 @@ let state = {
   mousedown: 0,
   mining: { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() },
 };
+state.inv.items[0] = { id: ID_ITEM_BONEMEAL };
+
 for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
   for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
     const t_y = 0;
@@ -511,7 +518,7 @@ for (let t_x = 0; t_x < MAP_SIZE; t_x++)
   let t_x = 3;
   let t_y = 1;
   let t_z = 1;
-  state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = ID_BLOCK_GRASS;
+  state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = ID_BLOCK_LEAVES;
   t_x += 2;
   state.map[t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z] = ID_BLOCK_LOG;
 }
@@ -594,8 +601,10 @@ window.onmousedown = e => {
       p[cast.side] -= cast.dir;
       const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
 
-      state.map[index] = i.items[i.held_i].id;
-      i.items[i.held_i] = 0;
+      if (i.items[i.held_i].id <= ID_BLOCK_LAST) {
+        state.map[index] = i.items[i.held_i].id;
+        i.items[i.held_i] = 0;
+      }
     }
   }
 }
@@ -709,8 +718,8 @@ function draw_scene(gl, program_info, geo) {
   {
     gl.vertexAttribPointer(
       /* index         */ program_info.attribLocations.a_tex_i,
-      /* numComponents */ 3,
-      /* type          */ gl.UNSIGNED_BYTE,
+      /* numComponents */ 2,
+      /* type          */ gl.UNSIGNED_SHORT,
       /* normalize     */ false,
       /* stride        */ VERT_FLOATS * Float32Array.BYTES_PER_ELEMENT,
       /* offset        */           4 * Float32Array.BYTES_PER_ELEMENT,
@@ -738,7 +747,7 @@ function draw_scene(gl, program_info, geo) {
 function init_shader_program(gl) {
   const vs_source = `
     attribute vec4 a_vpos;
-    attribute vec3 a_tex_i;
+    attribute vec2 a_tex_i;
 
     uniform mat4 u_view_proj;
 
@@ -747,19 +756,19 @@ function init_shader_program(gl) {
 
     void main(void) {
       gl_Position = u_view_proj * a_vpos;
-      v_texcoord.x =   mod(a_tex_i.x , 16.0) +   mod(a_tex_i.y , 2.0);
-      v_texcoord.y = floor(a_tex_i.x / 16.0) + floor(a_tex_i.y / 2.0);
-      v_texcoord /= 16.0;
+      v_texcoord.x =   mod(a_tex_i.x , ${SS_COLUMNS}.0) + mod(      a_tex_i.y , 2.0);
+      v_texcoord.y = floor(a_tex_i.x / ${SS_COLUMNS}.0) + mod(floor(a_tex_i.y / 2.0), 2.0);
+      v_texcoord /= ${SS_COLUMNS}.0;
 
       v_color = vec4(1.0);
-      if (mod(a_tex_i.z, 2.0) == 1.0)
+      if (mod(floor(a_tex_i.y / 4.0), 2.0) == 1.0)
         v_color.x -= 0.2,
         v_color.y -= 0.2,
         v_color.z -= 0.2;
-      if (floor(a_tex_i.z / 2.0) == 1.0)
+      if (mod(floor(a_tex_i.y / 8.0), 2.0) == 1.0)
         v_color.xyz = mix(
-          vec3(0.412, 0.765, 0.314),
-          vec3(0.196, 0.549, 0.235),
+          vec3(0.412, 0.765, 0.314) + 0.1,
+          vec3(0.196, 0.549, 0.235) + 0.1,
           0.01
         );
       // if (mod(a_tex_i.z, 2.0) == 1.0) {
@@ -853,12 +862,14 @@ function gl_upload_image(gl, image, i) {
   gl.generateMipmap(gl.TEXTURE_2D);
 }
 
-const SPRITESHEET_SCALE = 256;
+const letter_widths = [...Array(16*16)].fill(6);
+const SPRITESHEET_SIZE = SS_COLUMNS*16;
 let spritesheet, ss_ctx;
 async function ss_sprite(gl) {
 
   const terrain = new Image(); terrain.src = './terrain.png';
   const   items = new Image();   items.src = './items.png'  ;
+  const    font = new Image();    font.src = './font.png'   ;
   await Promise.all([
     new Promise(res => terrain.onload = res),
     new Promise(res =>   items.onload = res),
@@ -866,11 +877,54 @@ async function ss_sprite(gl) {
 
   if (spritesheet == undefined) {
     spritesheet = document.createElement("canvas");
-    spritesheet.width = spritesheet.height = SPRITESHEET_SCALE;
+    spritesheet.width = spritesheet.height = SPRITESHEET_SIZE;
     ss_ctx = spritesheet.getContext("2d");
+    ss_ctx.msImageSmoothingEnabled     = false;
+    ss_ctx.mozImageSmoothingEnabled    = false;
+    ss_ctx.webkitImageSmoothingEnabled = false;
+    ss_ctx.imageSmoothingEnabled       = false;
   }
 
-  ss_ctx.drawImage(terrain, 0, 0, SPRITESHEET_SCALE, SPRITESHEET_SCALE);
+  ss_ctx.drawImage(font, 0, 0);
+  const font_imgd = ss_ctx.getImageData(0, 0, 128, 128);
+  const font_px = font_imgd.data;
+
+  for (const i in letter_widths) {
+    const ltr_x = i % 16;
+    const ltr_y = Math.floor(i / 16);
+
+    let width = 0;
+    for (let x = 0; x < 8; x++) {
+      let hit = 0;
+      for (let y = 0; y < 8; y++) {
+        hit ||= +!!font_px[((ltr_y*8 + y)*128 + (ltr_x*8 + x))*4+3];
+      }
+      if (!hit) break;
+      width++;
+    }
+
+    // let out = '';
+    // for (let y = 0; y < 8; y++) {
+    //   for (let x = 0; x < 8; x++) {
+    //     out += +!!font_px[((ltr_y*8 + y)*128 + (ltr_x*8 + x))*4+3];
+    //   }
+    //   out += '\n';
+    // }
+    // console.log(out, String.fromCharCode(i), width);
+    letter_widths[i] = 1+width;
+  }
+  letter_widths[' '.charCodeAt(0)] = 5;
+  ss_ctx.clearRect(0, 0, spritesheet.width, spritesheet.height);
+
+  // const str = "surprisingly okay with that";
+  // for (const i in str) {
+  //   const chr = str[i];
+  //   console.log(chr, letter_widths[chr.charCodeAt(0)]);
+  // }
+
+  ss_ctx.drawImage(terrain,              0, 0, terrain.width, terrain.height);
+  ss_ctx.drawImage(  items, terrain. width, 0, terrain.width, terrain.height);
+  ss_ctx.drawImage(   font, 0, terrain.height, terrain.width, terrain.height);
   gl_upload_image(gl, spritesheet, 0);
 }
 
@@ -938,6 +992,15 @@ async function ss_sprite(gl) {
   requestAnimationFrame(function render(now) {
     requestAnimationFrame(render);
 
+    if (0) {
+      canvas.hidden = true;
+      document.body.appendChild(spritesheet);
+      spritesheet.style.position = 'absolute';
+      spritesheet.style['top'] = '0px';
+      spritesheet.style['left'] = '0px';
+      document.body.style.background = 'black';
+    }
+
     {
       let vrt_i = 0;
       let idx_i = 0;
@@ -973,7 +1036,15 @@ async function ss_sprite(gl) {
              0,  1,  2,  0,  2,  3, // front
              4,  5,  6,  4,  6,  7, // right
           ]
-       }
+        },
+        item: {
+          positions: new Float32Array([
+            0.5, 1, 0,   0.5, 1, 1,   0.5, 0, 1,    0.5, 0, 0,   // Right face
+          ]),
+          indices: [
+             0,  1,  2,  0,  2,  3, // front
+          ]
+        },
       };
       function place_cube(t_x, t_y, t_z, tex_offset, opts={}) {
         const { positions, indices } = opts.model ?? models.cube;
@@ -998,23 +1069,21 @@ async function ss_sprite(gl) {
           geo.cpu_position[vrt_i++] = q[2];
           geo.cpu_position[vrt_i++] = q[3];
 
-          const u8_cast = new Uint8Array(
+          const u16_cast = new Uint16Array(
             geo.cpu_position.buffer,
             Float32Array.BYTES_PER_ELEMENT * vrt_i++
           );
 
-          u8_cast[0] = tex;
+          u16_cast[0] = tex;
 
           let corner_x, corner_y;
           if ((i/3)%4 == 0) corner_x = 0, corner_y = 0;
           if ((i/3)%4 == 1) corner_x = 1, corner_y = 0;
           if ((i/3)%4 == 2) corner_x = 1, corner_y = 1;
           if ((i/3)%4 == 3) corner_x = 0, corner_y = 1;
-          u8_cast[1] = corner_x | (corner_y << 1);
-
           const darken = opts.darken ?? (i >= positions.length/2);
           const biomed = ((opts.biomed && opts.biomed[face_i]) ?? opts.biomed) ?? 0;
-          u8_cast[2] = darken | (biomed << 1);
+          u16_cast[1] = corner_x | (corner_y << 1) | (darken << 2) | (biomed << 3);
         }
 
         for (const i_o of indices)
@@ -1024,7 +1093,7 @@ async function ss_sprite(gl) {
         const tile_idx_i = vrt_i / VERT_FLOATS;
 
         const positions = new Float32Array([
-          0, 0, 1,   1, 0, 1,   1, 1, 1,   0, 1, 1, // Front face
+          0, 1, 1,   1, 1, 1,   1, 0, 1,   0, 0, 1,   // Front face
         ]);
         for (let i = 0; i < positions.length; i += 3) {
           const x = positions[i + 0]*quad_w + quad_x;
@@ -1040,19 +1109,20 @@ async function ss_sprite(gl) {
           geo.cpu_position[vrt_i++] = 0.85;
           geo.cpu_position[vrt_i++] = 1.00;
 
-          const u8_cast = new Uint8Array(
+          const u16_cast = new Uint16Array(
             geo.cpu_position.buffer,
             Float32Array.BYTES_PER_ELEMENT * vrt_i++
           );
 
-          u8_cast[0] = tex_offset;
+          u16_cast[0] = tex_offset;
           let corner_x, corner_y;
           if ((i/3)%4 == 0) corner_x = 0, corner_y = 0;
           if ((i/3)%4 == 1) corner_x = 1, corner_y = 0;
           if ((i/3)%4 == 2) corner_x = 1, corner_y = 1;
           if ((i/3)%4 == 3) corner_x = 0, corner_y = 1;
-          u8_cast[1] = corner_x | (corner_y << 1);
-          u8_cast[2] = opts.darken ?? 0;
+          const darken = opts.darken ?? 0;
+          const biomed = 0;
+          u16_cast[1] = corner_x | (corner_y << 1) | (darken << 2) | (biomed << 3);
         }
 
         for (const i_o of [
@@ -1069,21 +1139,26 @@ async function ss_sprite(gl) {
         if (block_id == ID_BLOCK_GRASS) {
           opts.biomed = top_n_bottom(1, 0);
         }
+        if (block_id > ID_BLOCK_LAST) {
+          opts.model = models.item;
+        }
 
-        let tex_offset;
+        let tex_offset = 0;
+        if (block_id == ID_ITEM_BONEMEAL  ) tex_offset = SS_COLUMNS*11 + 31;
         if (block_id == ID_BLOCK_WOOD     ) tex_offset = 4;
         if (block_id == ID_BLOCK_GRASS    ) tex_offset = top_n_bottom(0, 2);
         if (block_id == ID_BLOCK_DIRT     ) tex_offset = 2;
-        if (block_id == ID_BLOCK_GLASS    ) tex_offset = 3*16 + 1;
+        if (block_id == ID_BLOCK_GLASS    ) tex_offset = 3*SS_COLUMNS + 1;
         if (block_id == ID_BLOCK_SAPLING  ) tex_offset = 15;
-        if (block_id == ID_BLOCK_LOG      ) tex_offset = top_n_bottom(16*1 + 5, 16*1 + 4);
+        if (block_id == ID_BLOCK_LOG      ) tex_offset = top_n_bottom(SS_COLUMNS*1 + 5, SS_COLUMNS*1 + 4);
+        if (block_id == ID_BLOCK_LEAVES   ) tex_offset = 3*SS_COLUMNS + 5, opts.biomed = 1;
         const bdelta = block_id - ID_BLOCK_BREAKING;
-        if (bdelta < 10 && bdelta >= 0) tex_offset = 16*15 + bdelta;
+        if (bdelta < 10 && bdelta >= 0) tex_offset = SS_COLUMNS*15 + bdelta;
 
         place_cube(t_x, t_y, t_z, tex_offset, opts);
         if (block_id == ID_BLOCK_GRASS) {
           opts.biomed = 1;
-          place_cube(t_x, t_y, t_z, top_n_bottom(-1, 16*2 + 6), opts);
+          place_cube(t_x, t_y, t_z, top_n_bottom(-1, SS_COLUMNS*2 + 6), opts);
         }
       }
 
@@ -1211,6 +1286,29 @@ async function ss_sprite(gl) {
         place_block(0, 0, 0, id, { view_proj, mat });
       }
 
+      const ui_str = (str, x, y, size) => {
+        let cursor = 0;
+        for (const i in str) {
+          const chr = str[i];
+          const code = chr.charCodeAt(0);
+          const code_x = code % 16;
+          const code_y = Math.floor(code / 16);
+
+          const tex = SS_COLUMNS*(code_y + 16) + code_x;
+          place_ui_quad(
+            view_proj,
+            x + size*cursor, y,
+            size, size,
+            tex,
+            { transparent: 0, darken: 0 }
+          );
+          cursor += letter_widths[code]/8;
+        }
+        return cursor;
+      };
+      const size = Date.now()/20000 % 0.2;
+      ui_str("sup nerd", 0, 1 - size, size);
+
       for (let i = 0; i < 9; i++) {
         const size = 1/10;
         const border = 1/9*1/16;
@@ -1221,9 +1319,25 @@ async function ss_sprite(gl) {
         const x = pad + (size - border)*i;
         const transparent = i != (state.inv.held_i);
         const darken = !transparent;
-        place_ui_quad(view_proj, x, 0, size, size, 3*16 + 1, { transparent, darken });
+
+        const glass = 3*SS_COLUMNS + 1;
+        place_ui_quad(view_proj, x, 0, size, size, glass, { transparent, darken });
         if (state.inv.items[i]) {
-          ui_cube(x, 0, state.inv.items[i].id);
+          const id = state.inv.items[i].id;
+          if (id <= ID_BLOCK_LAST)
+            ui_cube(x, 0, id);
+          else {
+            const item_size = size * (12/16);
+            const item_pad = (size - item_size)/2;
+            place_ui_quad(
+              view_proj,
+              x + item_pad,
+              0 + item_pad,
+              item_size, item_size,
+              SS_COLUMNS*11 + 31,
+              { transparent, darken }
+            );
+          }
         }
       }
 
