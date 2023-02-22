@@ -465,14 +465,14 @@ function sub3(l, r) {
 function mul3_f(v, f) {
   return [v[0] * f, v[1] * f, v[2] * f];
 }
-function ray_to_plane(p, v, n, d) {
+function ray_to_plane_t(p, v, n, d) {
   const denom = dot(n, v);
   if (Math.abs(denom) <= 0.0001) return;
 
   const t = -(dot(n, p) + d) / dot(n, v);
   if (t <= 0.0001) return;
 
-  return add3(p, mul3_f(v, t));
+  return t;// add3(p, mul3_f(v, t));
 }
 
 let _id = 0;
@@ -482,6 +482,9 @@ const ID_BLOCK_STONE    = _id++;
 const ID_BLOCK_WOOD     = _id++;
 const ID_BLOCK_GRASS    = _id++;
 const ID_BLOCK_GLASS    = _id++;
+const ID_BLOCK_FLOWER0  = _id++;
+const ID_BLOCK_FLOWER1  = _id++;
+const ID_BLOCK_FLOWER2  = _id++;
 const ID_BLOCK_SAPLING  = _id++;
 const ID_BLOCK_LOG      = _id++;
 const ID_BLOCK_LEAVES   = _id++;
@@ -512,9 +515,12 @@ function id_to_tex_num(block_id) {
   if (block_id == ID_BLOCK_DIRT     ) tex_offset = 2;
   if (block_id == ID_BLOCK_STONE    ) tex_offset = 1;
   if (block_id == ID_BLOCK_GLASS    ) tex_offset = 3*SS_COLUMNS + 1;
+  if (block_id == ID_BLOCK_FLOWER0  ) tex_offset = 12;
+  if (block_id == ID_BLOCK_FLOWER1  ) tex_offset = 13;
+  if (block_id == ID_BLOCK_FLOWER2  ) tex_offset = 2*SS_COLUMNS + 7;
   if (block_id == ID_BLOCK_SAPLING  ) tex_offset = 15;
   if (block_id == ID_BLOCK_LOG      ) tex_offset = top_n_bottom(SS_COLUMNS*1 + 5, SS_COLUMNS*1 + 4);
-  if (block_id == ID_BLOCK_LEAVES   ) tex_offset = 3*SS_COLUMNS + 5;
+  if (block_id == ID_BLOCK_LEAVES   ) tex_offset = 3*SS_COLUMNS + 4;
   const bdelta = block_id - ID_BLOCK_BREAKING;
   if (bdelta < 10 && bdelta >= 0) tex_offset = SS_COLUMNS*15 + bdelta;
 
@@ -522,8 +528,9 @@ function id_to_tex_num(block_id) {
 }
 
 let state = {
-  pos:        [0, 1.1, 6],
-  last_block: [0, 1, 6],
+  tick: 0,
+  pos:      [0, 3.1, 6],
+  last_pos: [0, 3.1, 6],
   inv: {
     items: [...Array(9)].fill(0),
     held_i: 0,
@@ -537,17 +544,28 @@ let state = {
   cam: { yaw_deg: 130, pitch_deg: -20 },
   keysdown: {},
   mousedown: 0,
-  mining: { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() },
+  /* ticks for physics, timestamps for animations */
+  mining:  { ts_start: Date.now(), ts_end: Date.now(), block_coord: undefined },
+  using:   { ts_start: Date.now(), ts_end: Date.now() },
+  jumping: { tick_start:        0, tick_end:        0 },
 };
-state.inv.items[0] = { id: ID_ITEM_BONEMEAL, amount: 10 };
-state.inv.items[1] = { id: ID_BLOCK_LOG, amount: 1 };
-state.inv.items[2] = { id: ID_ITEM_T0_SPADE, amount: 1 };
-state.inv.items[3] = { id: ID_ITEM_T0_PICK, amount: 1 };
-state.inv.items[4] = { id: ID_ITEM_T0_AXE, amount: 1 };
+state.inv.items[0] = { id: ID_ITEM_T0_SPADE, amount: 1 };
+state.inv.items[1] = { id: ID_ITEM_T0_PICK, amount: 1 };
+state.inv.items[2] = { id: ID_ITEM_T0_AXE, amount: 1 };
+state.inv.items[3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
+state.inv.items[4] = { id: ID_BLOCK_SAPLING, amount: 10 };
+state.inv.items[5] = { id: ID_BLOCK_LOG, amount: 1 };
 
 for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
   for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
     const t_y = 0;
+
+    const top_i = map_index(t_x, t_y+1, t_z);
+    if (Math.random() < ( 8/(MAP_SIZE*MAP_SIZE)))
+      state.map[top_i] = (Math.random() < 0.5) ? ID_BLOCK_FLOWER0 : ID_BLOCK_FLOWER1;
+    if (Math.random() < (16/(MAP_SIZE*MAP_SIZE)))
+      state.map[top_i] = ID_BLOCK_FLOWER2;
+
     state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_GRASS;
   }
 for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
@@ -561,11 +579,11 @@ for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++)
   let t_z = 1;
   state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_LEAVES;
 }
-{
-  let t_x = 10;
-  let t_y = 1;
-  let t_z = 3;
-  for (let i = 0; i < 4; i++)
+function place_tree(t_x, t_y, t_z) {
+  const height = 4 + (Math.random() < 0.4) +
+                     (Math.random() < 0.3);
+
+  for (let i = 0; i < height; i++)
     state.map[map_index(t_x, t_y++, t_z)] = ID_BLOCK_LOG;
   t_y -= 2;
 
@@ -586,10 +604,44 @@ for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++)
 
         p[1] += 2;
         const index = map_index(...add3(p, heart));
-        if (state.map[index] == ID_BLOCK_LOG) continue;
+        if (state.map[index] != ID_BLOCK_NONE) continue;
         state.map[index] = ID_BLOCK_LEAVES;
       }
 }
+place_tree(10, 1, 3);
+
+/* used for player & particle vs. world collision */
+function pin_to_empty(ent) {
+  ent.last_pos ??= [...ent.pos];
+
+  const new_pos = ent.pos;
+  const pos = [...ent.last_pos];
+
+  let hit = [0, 0, 0];
+  for (let i = 0; i < 3; i++) {
+
+    const coord = [...pos];
+    coord[i] = new_pos[i];
+    const new_block = [Math.floor(coord[0]),
+                       Math.floor(coord[1]),
+                       Math.floor(coord[2])];
+    const index = new_block[0]*MAP_SIZE*MAP_SIZE + new_block[1]*MAP_SIZE + new_block[2];
+    let hard = 1;
+    if (state.map[index] == ID_BLOCK_NONE)    hard = 0;
+    if (state.map[index] == ID_BLOCK_SAPLING) hard = 0;
+    if (state.map[index] == ID_BLOCK_FLOWER0) hard = 0;
+    if (state.map[index] == ID_BLOCK_FLOWER1) hard = 0;
+    if (state.map[index] == ID_BLOCK_FLOWER2) hard = 0;
+
+    if (!hard) pos[i] = new_pos[i];
+    else hit[i] = 1;
+  }
+  ent.pos      = [...pos];
+  ent.last_pos = [...pos];
+
+  return (hit[0] || hit[1] || hit[2]) ? hit : false;
+}
+
 function ray_to_map(ray_origin, ray_direction) {
   const ret = {
     impact: [0, 0, 0],
@@ -665,16 +717,58 @@ window.onmousedown = e => {
     const cast = ray_to_map(cam_eye(), cam_looking());
 
     if (cast.coord) {
-      const p = [...cast.coord];
-      p[cast.side] -= cast.dir;
-      const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
-
-      if (i.items[i.held_i].id <= ID_BLOCK_LAST) {
-        state.map[index] = i.items[i.held_i].id;
-
-        i.items[i.held_i].amount--;
-        if (i.items[i.held_i].amount == 0)
+      /* use up x1 of held item */ 
+      const consume = () => {
+        held.amount--;
+        if (held.amount == 0)
           i.items[i.held_i] = 0;
+      };
+
+      const p = [...cast.coord];
+
+      const held = i.items[i.held_i];
+      if (held.id <= ID_BLOCK_LAST) {
+        p[cast.side] -= cast.dir;
+        const dst_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+        state.map[dst_index] = held.id;
+
+        consume();
+      } else {
+        if (held.id == ID_ITEM_BONEMEAL) {
+          state.using.ts_start = Date.now();
+          state.using.ts_end   = Date.now() + 350;
+
+          const src_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+          const under_index = p[0]*MAP_SIZE*MAP_SIZE + (p[1] - 1)*MAP_SIZE + p[2];
+          const on_sap = state.map[src_index] == ID_BLOCK_SAPLING;
+          const on_dirt = state.map[src_index] == ID_BLOCK_DIRT  ||
+                          state.map[src_index] == ID_BLOCK_GRASS  ;
+          const over_dirt = state.map[under_index] == ID_BLOCK_DIRT  ||
+                            state.map[under_index] == ID_BLOCK_GRASS  ;
+          if (on_sap && over_dirt) {
+            place_tree(...cast.coord);
+            consume();
+          } else if (on_dirt || over_dirt) {
+            if (over_dirt) p[1] -= 1;
+
+            /* place flowers */
+            const min_x = p[0] - 1, max_x = p[0] + 1;
+            const min_z = p[2] - 1, max_z = p[2] + 1;
+            for (let ox = 0; ox <= (max_x-min_x); ox++)  {
+              for (let oz = 0; oz <= (max_z-min_z); oz++) {
+                const top_i = map_index(min_x + ox, p[1]+1, min_z + oz);
+
+                if (state.map[top_i] != ID_BLOCK_NONE) continue;
+                if (Math.random() < (3/(3*3)))
+                  state.map[top_i] = (Math.random() < 0.5) ? ID_BLOCK_FLOWER0 : ID_BLOCK_FLOWER1;
+                if (Math.random() < (5/(3*3)))
+                  state.map[top_i] = ID_BLOCK_FLOWER2;
+              }
+            }
+
+            consume();
+          }
+        }
       }
     }
   }
@@ -687,13 +781,28 @@ window.onmouseup = e => {
 }
 window.onmousemove = e => {
   if (!document.pointerLockElement) return;
+
+  /* used to roll back superfluous cam movement emitted on pointerlockchange (see handler) */ 
+  state.last_cam = {...state.cam};
+
   const dy = e.movementY * 0.35;
   const dx = e.movementX * 0.35;
   state.cam.pitch_deg = Math.max(-89, Math.min(89, state.cam.pitch_deg - dy));
   state.cam.yaw_deg = (state.cam.yaw_deg - dx) % 360;
 };
+document.onpointerlockchange = () => {
+  if (!document.pointerLockElement)
+    state.cam = {...state.last_cam};
+};
 window.onkeydown = e => {
   state.keysdown[e.code] = 1;
+
+  if (e.code == 'Space')
+    if (state.tick > state.jumping.tick_end && state.jumping.grounded) {
+      state.jumping.tick_end = state.tick + 0.3*SEC_IN_TICKS;
+      state.jumping.tick_start = state.tick;
+      state.jumping.grounded = 0;
+    }
 
   const digit = parseInt(e.code['Digit'.length]);
   if (digit) state.inv.held_i = digit-1;
@@ -725,10 +834,10 @@ function cam_view_proj(canvas) {
     proj,
     FIELD_OF_VIEW,
     canvas.clientWidth / canvas.clientHeight,
-    0.1,
+    0.005,
     100
   );
-
+  
   const eye = cam_eye();
   const view = mat4_create();
   mat4_target_to(view, eye, add3(cam_looking(), eye));
@@ -749,42 +858,22 @@ function draw_scene(gl, program_info, geo) {
   gl.clearDepth(1.0);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  {
-    const fwd = cam_looking(); fwd[1] = 0; norm(fwd);
-    const side = cross3(VEC3_UP, fwd);
-    let new_pos = [...state.pos];
-    if (state.keysdown['KeyW']) new_pos = add3(new_pos, mul3_f( fwd,  0.1));
-    if (state.keysdown['KeyS']) new_pos = add3(new_pos, mul3_f( fwd, -0.1));
-    if (state.keysdown['KeyA']) new_pos = add3(new_pos, mul3_f(side,  0.1));
-    if (state.keysdown['KeyD']) new_pos = add3(new_pos, mul3_f(side, -0.1));
-
-    for (let i = 0; i < 3; i++) {
-      const coord = [...state.pos];
-      coord[i] = new_pos[i];
-      const new_block = [Math.floor(coord[0]),
-                         Math.floor(coord[1]),
-                         Math.floor(coord[2])];
-      const index = new_block[0]*MAP_SIZE*MAP_SIZE + new_block[1]*MAP_SIZE + new_block[2];
-      const hard = state.map[index] != ID_BLOCK_NONE;
-
-      if (!hard) state.pos[i] = new_pos[i];
-    }
-  }
-
   state.items = state.items.filter(item => {
     if (mag3(sub3(item.pos, state.pos)) < 1.5) {
 
       /* find place for item in inventory */
-      for (const i in state.inv.items) {
-        if (state.inv.items[i].id == item.id) {
-          state.inv.items[i].amount += item.amount;
-          break;
-        }
-        if (!state.inv.items[i]) {
-          state.inv.items[i] = item;
-          break;
-        }
-      }
+      (() => {
+        for (const i in state.inv.items)
+          if (state.inv.items[i].id == item.id) {
+            state.inv.items[i].amount += item.amount;
+            return;
+          }
+        for (const i in state.inv.items)
+          if (!state.inv.items[i]) {
+            state.inv.items[i] = item;
+            return;
+          }
+      })();
 
       return false;
     }
@@ -1026,6 +1115,100 @@ async function ss_sprite(gl) {
   gl_upload_image(gl, spritesheet, 0);
 }
 
+const SEC_IN_TICKS = 60;
+function tick() {
+  state.tick++;
+
+  if ((state.tick % (SEC_IN_TICKS/2)) == 0) {
+    const pending = [];
+
+    for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
+      for (let t_y = 0; t_y < MAP_SIZE; t_y++) 
+        for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
+          const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
+          let block_id = state.map[index];
+          if (block_id == ID_BLOCK_LEAVES) {
+            let decay = 1;
+            for (let o_x = -2; o_x <= 2; o_x++) 
+              for (let o_y = -2; o_y <= 2; o_y++) 
+                for (let o_z = -2; o_z <= 2; o_z++) {
+                  const nbr_index = map_index(o_x + t_x, o_y + t_y, o_z + t_z);
+                  if (state.map[nbr_index] == ID_BLOCK_LOG) decay = 0;
+                }
+
+            if (decay && (Math.random() < 0.1)) pending.push(index);
+          }
+        }
+    for (const index of pending)
+      state.map[index] = ID_BLOCK_NONE;
+  }
+
+  for (const i of state.items) {
+    i.vel ??= 0;
+
+    i.vel -= 0.09/SEC_IN_TICKS;
+    i.pos[1] += i.vel;
+    if (pin_to_empty(i)) i.vel = 0;
+  }
+
+  let jumping_off = 0;
+  {
+    const elapsed = state.tick - state.jumping.tick_start;
+    if (elapsed > 0 && elapsed < 0.08*SEC_IN_TICKS) {
+      jumping_off = 1;
+      state.vel += 2.0/SEC_IN_TICKS;
+    }
+  }
+  {
+    state.tick_start_move ??= 0;
+    state.vel ??= 0;
+    state.delta ??= [0, 0, 0];
+
+    state.vel -= 0.35/SEC_IN_TICKS;
+    state.pos[1] += state.vel;
+
+    state.jumping.grounded = 0;
+
+    let hit;
+    if (hit = pin_to_empty(state)) {
+      if (hit[0]) state.delta[0] *= 0.8;
+      if (hit[2]) state.delta[2] *= 0.8;
+
+      if (hit[1]) {
+        state.vel = 0;
+        state.jumping.grounded = 1;
+      }
+    }
+
+    if (state.jumping.grounded || jumping_off) {
+      const fwd = cam_looking(); fwd[1] = 0; norm(fwd);
+      const side = cross3(VEC3_UP, fwd);
+
+      let delta = [0, 0, 0];
+      let move = 0;
+      if (state.keysdown['KeyW']) move = 1, delta = add3(delta, mul3_f( fwd,  0.1));
+      if (state.keysdown['KeyS']) move = 1, delta = add3(delta, mul3_f( fwd, -0.1));
+      if (state.keysdown['KeyA']) move = 1, delta = add3(delta, mul3_f(side,  0.1));
+      if (state.keysdown['KeyD']) move = 1, delta = add3(delta, mul3_f(side, -0.1));
+
+      let t = 0;
+      const elapsed = state.tick - state.tick_start_move - 1;
+      if (elapsed > 0) t = Math.min(1, elapsed / (0.08*SEC_IN_TICKS));
+
+      delta = mul3_f(delta, t);
+      state.pos = add3(state.pos, delta);
+      state.delta = delta;
+
+      if (!move) state.tick_start_move = state.tick;
+
+      pin_to_empty(state)
+    } else {
+      state.pos[0] += state.delta[0];
+      state.pos[2] += state.delta[2];
+    }
+  }
+}
+
 (async () => {
   const canvas = document.getElementById("p1");
   const gl = canvas.getContext("webgl", { antialias: false });
@@ -1085,9 +1268,19 @@ async function ss_sprite(gl) {
   })();
 
   // Draw the scene repeatedly
-  let last;
+  let last, tick_acc = 0;;
   requestAnimationFrame(function render(now) {
     requestAnimationFrame(render);
+
+    let dt = 0;
+    if (last != undefined) dt = now - last;
+    last = now;
+
+    tick_acc += dt;
+    while (tick_acc >= 1000/SEC_IN_TICKS) {
+      tick_acc -= 1000/SEC_IN_TICKS;
+      tick();
+    }
 
     if (0) {
       canvas.hidden = true;
@@ -1240,15 +1433,13 @@ async function ss_sprite(gl) {
       function place_block(t_x, t_y, t_z, block_id, opts={}) {
         const topped = (_top, rest) => [rest, _top, rest, rest, rest, rest];
 
-        if (block_id == ID_BLOCK_SAPLING) {
-          opts.model = models.x;
-        }
-        if (block_id == ID_BLOCK_GRASS) {
-          opts.biomed = topped(1, 0);
-        }
-        if (block_id > ID_BLOCK_LAST) {
-          opts.model = models.item;
-        }
+        if (block_id == ID_BLOCK_FLOWER0) opts.model = models.x;
+        if (block_id == ID_BLOCK_FLOWER1) opts.model = models.x;
+        if (block_id == ID_BLOCK_FLOWER2) opts.model = models.x, opts.biomed = 1;
+        if (block_id == ID_BLOCK_SAPLING) opts.model = models.x;
+
+        if (block_id == ID_BLOCK_GRASS) opts.biomed = topped(1, 0);
+        if (block_id > ID_BLOCK_LAST) opts.model = models.item;
 
         const tex_offset = id_to_tex_num(block_id);
         if (block_id == ID_BLOCK_LEAVES) opts.biomed = 1;
@@ -1258,44 +1449,6 @@ async function ss_sprite(gl) {
           opts.biomed = 1;
           place_cube(t_x, t_y, t_z, topped(-1, SS_COLUMNS*2 + 6), opts);
         }
-      }
-
-      /* show item in hand */
-      if (state.inv.items[state.inv.held_i]) {
-        const item_id = state.inv.items[state.inv.held_i].id;
-
-        const proj = mat4_create();
-        const aspect = canvas.clientWidth / canvas.clientHeight;
-        mat4_perspective(
-          proj,
-          45 / 180 * Math.PI,
-          aspect,
-          0.135,
-          100_000
-        );
-        const view_proj = proj;
-
-        let swing_rot = 0;
-        let scale = 0.4;
-
-        if (item_id == ID_ITEM_T0_SPADE) scale = 0.8, swing_rot = -90;
-        if (item_id == ID_ITEM_T0_PICK ) scale = 0.8, swing_rot = -20;
-        if (item_id == ID_ITEM_T0_AXE  ) scale = 0.8, swing_rot = -20;
-
-        if (state.mining.ts_end > Date.now()) {
-
-          let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
-          t = Math.min(1, 8*(1 - 2*Math.abs(0.5 - t)));
-
-          swing_rot += 20*t*Math.cos(Date.now() * 0.03);
-        }
-
-        const mat = mat4_from_translation(mat4_create(), [aspect*0.55, -0.425, -1.85]);
-        mat4_mul(mat, mat, mat4_from_y_rotation(_scratch,        40 / 180 * Math.PI));
-        mat4_mul(mat, mat, mat4_from_x_rotation(_scratch, swing_rot / 180 * Math.PI));
-        mat4_mul(mat, mat, mat4_from_scaling(_scratch, [scale, scale, scale]));
-
-        place_block(0, 0, 0, item_id, { no_view_proj: 1, mat, view_proj });
       }
 
 
@@ -1327,48 +1480,46 @@ async function ss_sprite(gl) {
           const block_id = state.map[index];
 
           let mine_time = 2500;
-          if (block_id == ID_BLOCK_LEAVES) mine_time = 1550;
+          if (block_id == ID_BLOCK_LEAVES ) mine_time = 950;
+          if (block_id == ID_BLOCK_FLOWER0) mine_time = 350;
+          if (block_id == ID_BLOCK_FLOWER1) mine_time = 350;
+          if (block_id == ID_BLOCK_FLOWER2) mine_time = 350;
+          if (block_id == ID_BLOCK_SAPLING) mine_time = 350;
           if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_STONE ) mine_time =  950;
           if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_DIRT  ) mine_time =  750;
           if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_GRASS ) mine_time =  800;
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LOG   ) mine_time =  850;
-          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LEAVES) mine_time = 1150;
+          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LEAVES) mine_time =  750;
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_WOOD  ) mine_time =  650;
 
           state.mining.ts_end = Date.now() + mine_time;
         }
       }
 
-      /* removing block being mined before rendering map */
-      let mining_index = undefined;
-      let mining_block_type = undefined;
-      if (state.mining.block_coord) {
-        const p = state.mining.block_coord;
-        mining_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+      {
+        /* removing block being mined before rendering map */
+        let mining_index = undefined;
+        let mining_block_type = undefined;
+        if (state.mining.block_coord) {
+          const p = state.mining.block_coord;
+          mining_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
 
-        mining_block_type = state.map[mining_index];
-        state.map[mining_index] = 0;
-      }
+          mining_block_type = state.map[mining_index];
+          state.map[mining_index] = 0;
+        }
 
-      for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
-        for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) 
-          for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
-            const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
-            let block_id = state.map[index];
-            if (block_id != ID_BLOCK_NONE) place_block(t_x, t_y, t_z, block_id);
-          }
-      /* undo "removing block being mined before rendering map" */
-      if (mining_index)
-        state.map[mining_index] = mining_block_type;
-
-      /* render block being mined with animation */
-      if (mining_index && mining_block_type) {
-        let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
-        t = Math.min(1, t);
-        t = ease_out_sine(t);
-        if (t < 0.98) place_block(...state.mining.block_coord, mining_block_type);
-        const stage = Math.floor(lerp(0, 9, t));
-        place_block(...state.mining.block_coord, ID_BLOCK_BREAKING + stage);
+        for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
+          for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) 
+            for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
+              const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
+              let block_id = state.map[index];
+              if (block_id != ID_BLOCK_NONE   &&  
+                  block_id != ID_BLOCK_LEAVES )
+                place_block(t_x, t_y, t_z, block_id);
+            }
+        /* undo "removing block being mined before rendering map" */
+        if (mining_index)
+          state.map[mining_index] = mining_block_type;
       }
 
       /* render indicator of what block you are looking at */
@@ -1390,12 +1541,6 @@ async function ss_sprite(gl) {
         place_block(...p, ID_BLOCK_GLASS, { darken: 0, mat, transparent: 1 });
       }
       
-      for (const { pos, id } of state.items) {
-        const mat = mat4_from_y_rotation(mat4_create(), Date.now()/1000);
-        mat4_mul(mat, mat, mat4_from_scaling(mat4_create(), [0.3, 0.3, 0.3]));
-        place_block(...pos, id, { mat });
-      }
-
       const view_proj = mat4_create();
       const hotbar_size = 45*4 + 2;
       const ui_w = canvas.width /4;
@@ -1459,6 +1604,93 @@ async function ss_sprite(gl) {
         ], { tex_size_x: 512/16, tex_size_y: 512/16, view_proj, mat, darken: 0 });
       }
 
+      {
+        /* removing block being mined before rendering map */
+        let mining_index = undefined;
+        let mining_block_type = undefined;
+        if (state.mining.block_coord) {
+          const p = state.mining.block_coord;
+          mining_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+
+          mining_block_type = state.map[mining_index];
+          state.map[mining_index] = 0;
+        }
+
+        for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
+          for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) 
+            for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
+              const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
+              let block_id = state.map[index];
+              if (block_id == ID_BLOCK_LEAVES)
+                place_block(t_x, t_y, t_z, block_id);
+            }
+        /* undo "removing block being mined before rendering map" */
+        if (mining_index)
+          state.map[mining_index] = mining_block_type;
+
+        /* render block being mined with animation */
+        if (mining_index && mining_block_type) {
+          let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
+          t = Math.min(1, t);
+          t = ease_out_sine(t);
+          if (t < 0.98) place_block(...state.mining.block_coord, mining_block_type);
+          const stage = Math.floor(lerp(0, 9, t));
+          place_block(...state.mining.block_coord, ID_BLOCK_BREAKING + stage);
+        }
+      }
+
+      for (const { pos, id } of state.items) {
+        const mat = mat4_from_y_rotation(mat4_create(), Date.now()/1000);
+        mat4_mul(mat, mat, mat4_from_translation(mat4_create(), [0.0, 0.5, 0.0]));
+        mat4_mul(mat, mat, mat4_from_scaling(mat4_create(), [0.3, 0.3, 0.3]));
+        place_block(...pos, id, { mat });
+      }
+
+      /* show item in hand */
+      if (state.inv.items[state.inv.held_i]) {
+        const item_id = state.inv.items[state.inv.held_i].id;
+
+        const proj = mat4_create();
+        const aspect = canvas.clientWidth / canvas.clientHeight;
+        mat4_perspective(
+          proj,
+          45 / 180 * Math.PI,
+          aspect,
+          1.0,
+          100_000
+        );
+        const view_proj = proj;
+
+        let swing_rot = 0;
+        let scale = 0.4;
+
+        if (item_id == ID_ITEM_T0_SPADE) scale = 0.8, swing_rot = -90;
+        if (item_id == ID_ITEM_T0_PICK ) scale = 0.8, swing_rot = -20;
+        if (item_id == ID_ITEM_T0_AXE  ) scale = 0.8, swing_rot = -20;
+
+        if (state.mining.ts_end > Date.now()) {
+
+          let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
+          t = Math.min(1, 8*(1 - 2*Math.abs(0.5 - t)));
+
+          swing_rot += 20*t*Math.cos(Date.now() * 0.03);
+        }
+
+        if (state.using.ts_end > Date.now()) {
+          let t = inv_lerp(state.using.ts_start, state.using.ts_end, Date.now());
+          t = (1 - 2.2*Math.abs(0.5 - t));
+          t = ease_out_sine(t);
+          swing_rot -= 40*t;
+        }
+
+        const mat = mat4_from_translation(mat4_create(), [aspect*0.55, -0.425, -1.85]);
+        mat4_mul(mat, mat, mat4_from_y_rotation(_scratch,        40 / 180 * Math.PI));
+        mat4_mul(mat, mat, mat4_from_x_rotation(_scratch, swing_rot / 180 * Math.PI));
+        mat4_mul(mat, mat, mat4_from_scaling(_scratch, [scale, scale, scale]));
+
+        place_block(0, 0, 0, item_id, { no_view_proj: 1, mat, view_proj });
+      }
+
       const ui_str = (str, x, y, size, opts={}) => {
         let cursor = 0;
         for (const i in str) {
@@ -1486,7 +1718,7 @@ async function ss_sprite(gl) {
         const slot = 16*SS_COLUMNS + 16;
 
         const size_x = hotbar_size;
-        const opts = { tex_size_x: size_x/16, tex_size_y: size/16, z: -0.9999 };
+        const opts = { tex_size_x: size_x/16, tex_size_y: size/16, z: -0.9997 };
         place_ui_quad(view_proj, 0, 2, size_x, size, slot, opts);
       }
 
@@ -1501,7 +1733,7 @@ async function ss_sprite(gl) {
           if (id <= ID_BLOCK_LAST)
             ui_cube(x, 4, id);
           else
-            place_ui_quad(view_proj, x, 4, 16, 16, item_tex, { z: -1.0 });
+            place_ui_quad(view_proj, x, 4, 16, 16, item_tex, { z: -0.9998 });
 
           if (itm.amount > 1)
             ui_str(""+itm.amount, x, 4, 8, { z: -1.0 });
@@ -1524,7 +1756,7 @@ async function ss_sprite(gl) {
             {u: 0.13720703125, v: 0.1474609375 },
             {u: 0.125        , v: 0.1474609375 }
           ],
-          z: -1.0
+          z: -0.9999
         };
         place_ui_quad(view_proj, quad_x, 0, size, size, slot, opts);
       }
@@ -1557,10 +1789,6 @@ async function ss_sprite(gl) {
       geo.vrts_used = vrt_i;
       geo.idxs_used = idx_i;
     }
-
-    let dt = 0;
-    if (last != undefined) dt = now - last;
-    last = now;
 
     draw_scene(gl, program_info, geo);
   });
