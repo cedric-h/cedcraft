@@ -480,6 +480,7 @@ const ID_BLOCK_NONE     = _id++;
 const ID_BLOCK_DIRT     = _id++;
 const ID_BLOCK_STONE    = _id++;
 const ID_BLOCK_WOOD     = _id++;
+const ID_BLOCK_STAIRS   = _id++;
 const ID_BLOCK_GRASS    = _id++;
 const ID_BLOCK_GLASS    = _id++;
 const ID_BLOCK_FLOWER0  = _id++;
@@ -511,6 +512,7 @@ function id_to_tex_num(block_id) {
   if (block_id == ID_ITEM_T0_PICK   ) tex_offset = SS_COLUMNS*6 + 16;
   if (block_id == ID_ITEM_T0_AXE    ) tex_offset = SS_COLUMNS*7 + 16;
   if (block_id == ID_BLOCK_WOOD     ) tex_offset = 4;
+  if (block_id == ID_BLOCK_STAIRS   ) tex_offset = 4;
   if (block_id == ID_BLOCK_GRASS    ) tex_offset = topped(0, 2);
   if (block_id == ID_BLOCK_DIRT     ) tex_offset = 2;
   if (block_id == ID_BLOCK_STONE    ) tex_offset = 1;
@@ -554,7 +556,7 @@ state.inv.items[1] = { id: ID_ITEM_T0_PICK, amount: 1 };
 state.inv.items[2] = { id: ID_ITEM_T0_AXE, amount: 1 };
 state.inv.items[3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
 state.inv.items[4] = { id: ID_BLOCK_SAPLING, amount: 10 };
-state.inv.items[5] = { id: ID_BLOCK_LOG, amount: 1 };
+state.inv.items[5] = { id: ID_BLOCK_STAIRS, amount: 10 };
 
 for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
   for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
@@ -577,7 +579,7 @@ for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++)
   let t_x = 3;
   let t_y = 1;
   let t_z = 1;
-  state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_LEAVES;
+  state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_STAIRS;
 }
 function place_tree(t_x, t_y, t_z) {
   const height = 4 + (Math.random() < 0.4) +
@@ -614,7 +616,7 @@ place_tree(10, 1, 3);
 function pin_to_empty(ent) {
   ent.last_pos ??= [...ent.pos];
 
-  const new_pos = ent.pos;
+  const new_pos = [...ent.pos];
   const pos = [...ent.last_pos];
 
   let hit = [0, 0, 0];
@@ -625,13 +627,22 @@ function pin_to_empty(ent) {
     const new_block = [Math.floor(coord[0]),
                        Math.floor(coord[1]),
                        Math.floor(coord[2])];
-    const index = new_block[0]*MAP_SIZE*MAP_SIZE + new_block[1]*MAP_SIZE + new_block[2];
+    const index = map_index(new_block[0], new_block[1], new_block[2]);
+
     let hard = 1;
+    const   delta = new_pos[i] - pos[i];
     if (state.map[index] == ID_BLOCK_NONE)    hard = 0;
     if (state.map[index] == ID_BLOCK_SAPLING) hard = 0;
     if (state.map[index] == ID_BLOCK_FLOWER0) hard = 0;
     if (state.map[index] == ID_BLOCK_FLOWER1) hard = 0;
     if (state.map[index] == ID_BLOCK_FLOWER2) hard = 0;
+    if (state.map[index] == ID_BLOCK_STAIRS) {
+      /*  i == 0 && delta < 0 */
+      const x_frac = new_pos[0] - new_block[0] + 0.2;
+      const y_frac = new_pos[1] - new_block[1];
+      const ramp = y_frac > x_frac;
+      if (ramp) hard = 0;
+    }
 
     if (!hard) pos[i] = new_pos[i];
     else hit[i] = 1;
@@ -1201,6 +1212,18 @@ function tick() {
 
       if (!move) state.tick_start_move = state.tick;
 
+      /* stairs hack (works good) */
+      {
+        const block = [Math.floor(state.pos[0]),
+                       Math.floor(state.pos[1]),
+                       Math.floor(state.pos[2])];
+        const last_index = map_index(block[0], block[1], block[2]);
+
+        if (state.map[last_index] == ID_BLOCK_STAIRS)
+          if (delta[0] > 0)
+            state.pos[1] += 3.0*delta[0];
+      }
+
       pin_to_empty(state)
     } else {
       state.pos[0] += state.delta[0];
@@ -1299,6 +1322,7 @@ function tick() {
       const default_view_proj = cam_view_proj(gl.canvas);
       const models = {
         cube: {
+          dark_after_vert: 3*4*3,
           positions: new Float32Array([
             1, 1, 1,   0, 1, 1,   0, 0, 1,   1, 0, 1,   // Front face
             0, 1, 1,   1, 1, 1,   1, 1, 0,   0, 1, 0,   // Top face
@@ -1317,7 +1341,38 @@ function tick() {
             20, 21, 22, 20, 22, 23, // left
           ]
         },
+        stairs: {
+          dark_after_vert: 3*4*6,
+          positions: new Float32Array([
+            0.0, 0.5, 1.0,   0.0, 0.5, 0.0,   0.0, 0.0, 0.0,   0.0, 0.0, 1.0,   // Front face
+            0.5, 1.0, 1.0,   0.5, 1.0, 0.0,   0.5, 0.5, 0.0,   0.5, 0.5, 1.0,   // Front face
+            0.5, 1.0, 0.0,   0.5, 1.0, 1.0,   1.0, 1.0, 1.0,   1.0, 1.0, 0.0,   // Top face
+            0.0, 0.5, 0.0,   0.0, 0.5, 1.0,   0.5, 0.5, 1.0,   0.5, 0.5, 0.0,   // Top face
+            1.0, 1.0, 1.0,   0.5, 1.0, 1.0,   0.5, 0.5, 1.0,   1.0, 0.5, 1.0,   // Right face
+            1.0, 0.5, 1.0,   0.0, 0.5, 1.0,   0.0, 0.0, 1.0,   1.0, 0.0, 1.0,   // Right face
+                                                                            
+            1.0, 1.0, 0.0,   1.0, 1.0, 1.0,   1.0, 0.0, 1.0,   1.0, 0.0, 0.0,   // Back face
+            1.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 0.0,   1.0, 0.0, 0.0,   // Bottom face
+            0.5, 1.0, 0.0,   1.0, 1.0, 0.0,   1.0, 0.5, 0.0,   0.5, 0.5, 0.0,   // Left face
+            0.0, 0.5, 0.0,   1.0, 0.5, 0.0,   1.0, 0.0, 0.0,   0.0, 0.0, 0.0,   // Left face
+
+          ].map(x => lerp(-0.0012, 1.0012, x))),
+          // ]),
+          indices: [
+             0,  1,  2,  0,  2,  3, // front
+             4,  5,  6,  4,  6,  7, // back
+             8,  9, 10,  8, 10, 11, // top
+            12, 13, 14, 12, 14, 15, // bottom
+            16, 17, 18, 16, 18, 19, // right
+            20, 21, 22, 20, 22, 23, // left
+            24, 25, 26, 24, 26, 27, // right
+            28, 29, 30, 28, 30, 31, // left
+            32, 33, 34, 32, 34, 35, // left
+            36, 37, 38, 36, 38, 39, // left
+          ]
+        },
         x: {
+          dark_after_vert: 3*4*1,
           positions: new Float32Array([
             1, 1, 0.5,   0, 1, 0.5,    0, 0, 0.5,  1, 0, 0.5,    // Front face
             0.5, 1, 0,   0.5, 1, 1,   0.5, 0, 1,    0.5, 0, 0,   // Right face
@@ -1337,7 +1392,7 @@ function tick() {
         },
       };
       function place_cube(t_x, t_y, t_z, tex_offset, opts={}) {
-        const { positions, indices } = opts.model ?? models.cube;
+        const { dark_after_vert, positions, indices } = opts.model ?? models.cube;
         const tile_idx_i = vrt_i / VERT_FLOATS;
 
         for (let i = 0; i < positions.length; i += 3) {
@@ -1373,7 +1428,7 @@ function tick() {
             geo.cpu_position.buffer,
             Float32Array.BYTES_PER_ELEMENT * vrt_i++
           );
-          const darken = opts.darken ?? (i >= positions.length/2);
+          const darken = opts.darken ?? (i >= dark_after_vert);
           const biomed = ((opts.biomed && opts.biomed[face_i]) ?? opts.biomed) ?? 0;
           u8_cast[0] = (darken << 0) | (biomed << 1);
         }
@@ -1437,6 +1492,7 @@ function tick() {
         if (block_id == ID_BLOCK_FLOWER1) opts.model = models.x;
         if (block_id == ID_BLOCK_FLOWER2) opts.model = models.x, opts.biomed = 1;
         if (block_id == ID_BLOCK_SAPLING) opts.model = models.x;
+        if (block_id == ID_BLOCK_STAIRS)  opts.model = models.stairs;
 
         if (block_id == ID_BLOCK_GRASS) opts.biomed = topped(1, 0);
         if (block_id > ID_BLOCK_LAST) opts.model = models.item;
@@ -1491,6 +1547,7 @@ function tick() {
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LOG   ) mine_time =  850;
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LEAVES) mine_time =  750;
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_WOOD  ) mine_time =  650;
+          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_STAIRS) mine_time =  650;
 
           state.mining.ts_end = Date.now() + mine_time;
         }
