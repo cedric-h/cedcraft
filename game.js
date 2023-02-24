@@ -556,7 +556,7 @@ state.inv.items[1] = { id: ID_ITEM_T0_PICK, amount: 1 };
 state.inv.items[2] = { id: ID_ITEM_T0_AXE, amount: 1 };
 state.inv.items[3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
 state.inv.items[4] = { id: ID_BLOCK_SAPLING, amount: 10 };
-state.inv.items[5] = { id: ID_BLOCK_STAIRS, amount: 10 };
+state.inv.items[5] = { id: ID_BLOCK_STAIRS, amount: 20 };
 
 for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
   for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
@@ -610,7 +610,7 @@ function place_tree(t_x, t_y, t_z) {
         state.map[index] = ID_BLOCK_LEAVES;
       }
 }
-place_tree(10, 1, 3);
+// place_tree(10, 1, 3);
 
 /* used for player & particle vs. world collision */
 function pin_to_empty(ent) {
@@ -1208,10 +1208,9 @@ function tick() {
       state.delta = add3(state.delta, delta);
 
       /* stairs hack (works good) */
-      // for (let i = 0; i <= 5; i++) {
-      {
+      for (let i = 0; i <= 2; i++) {
         const block = [Math.floor(state.pos[0]),
-                       Math.floor(state.pos[1] + 0.01),
+                       Math.floor(state.pos[1] + 0.01*i),
                        Math.floor(state.pos[2])];
         const last_index = map_index(block[0], block[1], block[2]);
 
@@ -1220,12 +1219,18 @@ function tick() {
 
           if (delta[0] > 0.06) {
             state.pos[1] += 0.1;
-            state.vel += 3.5/SEC_IN_TICKS;
+            state.vel += 3.75/SEC_IN_TICKS;
+            state.jumping.tick_end = state.tick + 0.2*SEC_IN_TICKS;
             state.tick_start_move = state.tick;
           }
           else if (Math.abs(delta[0]) > 0.01) {
             state.pos[1] += 0.04;
           }
+          if (delta[0] < -0.04) {
+            state.jumping.tick_end = state.tick + 0.2*SEC_IN_TICKS;
+            state.vel += 3.75/SEC_IN_TICKS;
+          }
+          break;
         }
       }
 
