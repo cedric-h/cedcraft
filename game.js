@@ -543,6 +543,7 @@ let state = {
     { pos: [6.5, 1.2, 3.5], id: ID_BLOCK_DIRT , amount: 1 },
   ],
   map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
+  map_data: {}, /* same indices as map, has extra data tailored to map id */
   cam: { yaw_deg: 130, pitch_deg: -20 },
   keysdown: {},
   mousedown: 0,
@@ -638,10 +639,19 @@ function pin_to_empty(ent) {
     if (state.map[index] == ID_BLOCK_FLOWER2) hard = 0;
     if (state.map[index] == ID_BLOCK_STAIRS) {
       /*  i == 0 && delta < 0 */
-      const x_frac = new_pos[0] - new_block[0] + 0.2;
-      const y_frac = new_pos[1] - new_block[1];
-      const ramp = y_frac > x_frac;
-      if (ramp) hard = 0;
+      const md = state.map_data[index];
+
+      if (md && md.axis) {
+        const stair_i = (md.axis[0] != 0) ? 0 : 2;
+        const neg = md.axis[stair_i] < 0;
+
+        const delta = new_pos[stair_i] - new_block[stair_i];
+        const x_frac = neg ? (1 - delta) : delta;
+
+        const y_frac = new_pos[1] - new_block[1];
+        const ramp = y_frac > (x_frac + 0.2);
+        if (ramp) hard = 0;
+      }
     }
 
     if (!hard) pos[i] = new_pos[i];
@@ -742,13 +752,43 @@ window.onmousedown = e => {
 
       const held = i.items[i.held_i];
       if (held.id <= ID_BLOCK_LAST) {
+        /* place block */
         p[cast.side] -= cast.dir;
         const dst_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
         state.map[dst_index] = held.id;
 
+        let axised = 0;
+        let mirrored = 0;
+        let flattened = 0;
+        if (held.id == ID_BLOCK_LOG   ) axised = mirrored = 1;
+        if (held.id == ID_BLOCK_STAIRS) axised = flattened = 1;
+        if (axised) {
+          const center = add3(p, [0.5, 0.5, 0.5]);
+          const delta = sub3(state.pos, center);
+
+          let best_i = 0;
+          for (let i = 1; i <= 2; i++) {
+            if (flattened && i == 1) continue;
+            if (Math.abs(delta[best_i]) < Math.abs(delta[i]))
+              best_i = i;
+          }
+
+          const axis = [0, 0, 0];
+          axis[best_i] = Math.sign(delta[best_i]);
+
+          if (mirrored)
+            axis[0] = Math.abs(axis[0]),
+            axis[1] = Math.abs(axis[1]),
+            axis[2] = Math.abs(axis[2]);
+
+          console.log('axis', ...axis);
+          state.map_data[dst_index] = { axis };
+        }
+
         consume();
       } else {
         if (held.id == ID_ITEM_BONEMEAL) {
+          /* grow shit */
           const src_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
           const under_index = p[0]*MAP_SIZE*MAP_SIZE + (p[1] - 1)*MAP_SIZE + p[2];
           const on_sap = state.map[src_index] == ID_BLOCK_SAPLING;
@@ -1213,20 +1253,23 @@ function tick() {
                        Math.floor(state.pos[1] + 0.01*i),
                        Math.floor(state.pos[2])];
         const last_index = map_index(block[0], block[1], block[2]);
+        const md = state.map_data[last_index];
 
-        if (state.map[last_index] == ID_BLOCK_STAIRS) {
-          console.log("khgmg");
+        if (md && md.axis && state.map[last_index] == ID_BLOCK_STAIRS) {
+          const delta_i = (md.axis[0] != 0) ? 0 : 2;
+          const push = Math.sign(md.axis[delta_i]) * delta[delta_i];
 
-          if (delta[0] > 0.06) {
+          if (push > 0.06) {
             state.pos[1] += 0.1;
             state.vel += 3.75/SEC_IN_TICKS;
             state.jumping.tick_end = state.tick + 0.2*SEC_IN_TICKS;
             state.tick_start_move = state.tick;
           }
-          else if (Math.abs(delta[0]) > 0.01) {
+          else if (Math.abs(push) > 0.01) {
             state.pos[1] += 0.04;
           }
-          if (delta[0] < -0.04) {
+
+          if (push < -0.04) {
             state.jumping.tick_end = state.tick + 0.2*SEC_IN_TICKS;
             state.vel += 3.75/SEC_IN_TICKS;
           }
@@ -1234,18 +1277,19 @@ function tick() {
         }
       }
 
-      // const temp = { pos: [...state.pos], last_pos: [...state.last_pos] };
-      // temp.pos[1] += 1.8;
-      // console.log(pin_to_empty(temp));
-      // state.pos[0] = temp.pos[0];
-      // state.pos[2] = temp.pos[2];
-
     } else {
       state.pos[0] += state.delta[0]*0.1;
       state.pos[2] += state.delta[2]*0.1;
     }
 
-    const last_pos = [...state.last_pos]
+    if (0) {
+      const temp = { pos: [...state.pos], last_pos: [...state.last_pos] };
+      temp.pos[1] += 1.8;
+      console.log(pin_to_empty(temp));
+      state.pos[0] += temp.pos[0];
+      state.pos[2] += temp.pos[2];
+    }
+
     let hit = pin_to_empty(state)
 
     const grounded_before = state.jumping.grounded;
@@ -1522,11 +1566,52 @@ function tick() {
       function place_block(t_x, t_y, t_z, block_id, opts={}) {
         const topped = (_top, rest) => [rest, _top, rest, rest, rest, rest];
 
+        if (block_id == ID_BLOCK_LOG || block_id == ID_BLOCK_STAIRS) {
+          const index = map_index(t_x, t_y, t_z);
+          if (state.map[index] == block_id && state.map_data[index]) {
+
+            let x, y, z;
+
+            if (block_id == ID_BLOCK_LOG) {
+              /* orthogonal bases for a matrix to point "axis" up */
+              y = state.map_data[index].axis;
+              x = [...y];
+              {
+                let temp = x[2];
+                x[2] = x[1];
+                x[1] = x[0];
+                x[0] = temp;
+              }
+              z = cross3(y, x);
+            }
+            if (block_id == ID_BLOCK_STAIRS) {
+              y = [0, 1, 0];
+              x = state.map_data[index].axis;
+              z = cross3(y, x);
+            }
+
+            const mat = mat4_from_translation(mat4_create(), [0.5, 0.5, 0.5]);
+            mat[0+0] = x[0];
+            mat[0+1] = x[1];
+            mat[0+2] = x[2];
+            mat[0+3] = mat[0+3];
+            mat[4+0] = y[0];
+            mat[4+1] = y[1];
+            mat[4+2] = y[2];
+            mat[4+3] = mat[4+3];
+            mat[8+0] = z[0];
+            mat[8+1] = z[1];
+            mat[8+2] = z[2];
+            mat[8+3] = mat[8+3];
+            opts.mat = mat;
+          }
+        }
+
         if (block_id == ID_BLOCK_FLOWER0) opts.model = models.x;
         if (block_id == ID_BLOCK_FLOWER1) opts.model = models.x;
         if (block_id == ID_BLOCK_FLOWER2) opts.model = models.x, opts.biomed = 1;
         if (block_id == ID_BLOCK_SAPLING) opts.model = models.x;
-        if (block_id == ID_BLOCK_STAIRS)  opts.model = models.stairs;
+        if (block_id == ID_BLOCK_STAIRS )  opts.model = models.stairs;
 
         if (block_id == ID_BLOCK_GRASS) opts.biomed = topped(1, 0);
         if (block_id > ID_BLOCK_LAST) opts.model = models.item;
