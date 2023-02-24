@@ -549,7 +549,7 @@ let state = {
   /* ticks for physics, timestamps for animations */
   mining:  { ts_start: Date.now(), ts_end: Date.now(), block_coord: undefined },
   using:   { ts_start: Date.now(), ts_end: Date.now() },
-  jumping: { tick_start:        0, tick_end:        0 },
+  jumping: { tick_start:        0, tick_end:        0, tick_grounded: 0 },
 };
 state.inv.items[0] = { id: ID_ITEM_T0_SPADE, amount: 1 };
 state.inv.items[1] = { id: ID_ITEM_T0_PICK, amount: 1 };
@@ -730,6 +730,9 @@ window.onmousedown = e => {
     if (cast.coord) {
       /* use up x1 of held item */ 
       const consume = () => {
+        state.using.ts_start = Date.now();
+        state.using.ts_end   = Date.now() + 350;
+
         held.amount--;
         if (held.amount == 0)
           i.items[i.held_i] = 0;
@@ -746,9 +749,6 @@ window.onmousedown = e => {
         consume();
       } else {
         if (held.id == ID_ITEM_BONEMEAL) {
-          state.using.ts_start = Date.now();
-          state.using.ts_end   = Date.now() + 350;
-
           const src_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
           const under_index = p[0]*MAP_SIZE*MAP_SIZE + (p[1] - 1)*MAP_SIZE + p[2];
           const on_sap = state.map[src_index] == ID_BLOCK_SAPLING;
@@ -1165,10 +1165,10 @@ function tick() {
   let jumping_off = 0;
   {
     const elapsed = state.tick - state.jumping.tick_start;
-    if (elapsed > 0 && elapsed < 0.08*SEC_IN_TICKS) {
-      jumping_off = 1;
+    if (elapsed > 0 && elapsed < 0.08*SEC_IN_TICKS)
       state.vel += 2.0/SEC_IN_TICKS;
-    }
+    if (elapsed > 0 && elapsed < 0.10*SEC_IN_TICKS)
+      jumping_off = 1;
   }
   {
     state.tick_start_move ??= 0;
@@ -1177,19 +1177,6 @@ function tick() {
 
     state.vel -= 0.35/SEC_IN_TICKS;
     state.pos[1] += state.vel;
-
-    state.jumping.grounded = 0;
-
-    let hit;
-    if (hit = pin_to_empty(state)) {
-      if (hit[0]) state.delta[0] *= 0.8;
-      if (hit[2]) state.delta[2] *= 0.8;
-
-      if (hit[1]) {
-        state.vel = 0;
-        state.jumping.grounded = 1;
-      }
-    }
 
     if (state.jumping.grounded || jumping_off) {
       const fwd = cam_looking(); fwd[1] = 0; norm(fwd);
@@ -1204,31 +1191,72 @@ function tick() {
 
       let t = 0;
       const elapsed = state.tick - state.tick_start_move - 1;
-      if (elapsed > 0) t = Math.min(1, elapsed / (0.08*SEC_IN_TICKS));
-
-      delta = mul3_f(delta, t);
-      state.pos = add3(state.pos, delta);
-      state.delta = delta;
+      if (elapsed > 0) t = ease_out_circ(Math.min(1, elapsed / (0.1*SEC_IN_TICKS)));
 
       if (!move) state.tick_start_move = state.tick;
 
+      if (!move) {
+        let grounded_t = (state.tick - state.jumping.tick_grounded) / (0.1*SEC_IN_TICKS);
+        grounded_t = ease_out_circ(grounded_t);
+        if (grounded_t < 1)
+          delta = mul3_f(state.delta, 0.1*grounded_t);
+      }
+
+      delta = mul3_f(delta, t);
+      state.pos = add3(state.pos, delta);
+      state.delta = mul3_f(state.delta, 0.9);
+      state.delta = add3(state.delta, delta);
+
       /* stairs hack (works good) */
+      // for (let i = 0; i <= 5; i++) {
       {
         const block = [Math.floor(state.pos[0]),
-                       Math.floor(state.pos[1]),
+                       Math.floor(state.pos[1] + 0.01),
                        Math.floor(state.pos[2])];
         const last_index = map_index(block[0], block[1], block[2]);
 
-        if (state.map[last_index] == ID_BLOCK_STAIRS)
-          if (delta[0] > 0)
-            state.pos[1] += 3.0*delta[0];
+        if (state.map[last_index] == ID_BLOCK_STAIRS) {
+          console.log("khgmg");
+
+          if (delta[0] > 0.06) {
+            state.pos[1] += 0.1;
+            state.vel += 3.5/SEC_IN_TICKS;
+            state.tick_start_move = state.tick;
+          }
+          else if (Math.abs(delta[0]) > 0.01) {
+            state.pos[1] += 0.04;
+          }
+        }
       }
 
-      pin_to_empty(state)
+      // const temp = { pos: [...state.pos], last_pos: [...state.last_pos] };
+      // temp.pos[1] += 1.8;
+      // console.log(pin_to_empty(temp));
+      // state.pos[0] = temp.pos[0];
+      // state.pos[2] = temp.pos[2];
+
     } else {
-      state.pos[0] += state.delta[0];
-      state.pos[2] += state.delta[2];
+      state.pos[0] += state.delta[0]*0.1;
+      state.pos[2] += state.delta[2]*0.1;
     }
+
+    const last_pos = [...state.last_pos]
+    let hit = pin_to_empty(state)
+
+    const grounded_before = state.jumping.grounded;
+    state.jumping.grounded = 0;
+    if (hit) {
+      if (hit[0]) state.delta[0] *= 0.8;
+      if (hit[2]) state.delta[2] *= 0.8;
+
+      if (hit[1]) {
+        state.vel = 0;
+        state.jumping.grounded = 1;
+        if (!grounded_before)
+          state.jumping.tick_grounded = state.tick;
+      }
+    }
+
   }
 }
 
@@ -1298,6 +1326,7 @@ function tick() {
     let dt = 0;
     if (last != undefined) dt = now - last;
     last = now;
+    if (dt > 1000 * 5) dt = 0;
 
     tick_acc += dt;
     while (tick_acc >= 1000/SEC_IN_TICKS) {
