@@ -480,6 +480,7 @@ const ID_BLOCK_NONE     = _id++;
 const ID_BLOCK_DIRT     = _id++;
 const ID_BLOCK_STONE    = _id++;
 const ID_BLOCK_WOOD     = _id++;
+const ID_BLOCK_TABLE    = _id++;
 const ID_BLOCK_STAIRS   = _id++;
 const ID_BLOCK_GRASS    = _id++;
 const ID_BLOCK_GLASS    = _id++;
@@ -503,8 +504,8 @@ const MAP_SIZE = 16;
 const map_index = (x, y, z) => x*MAP_SIZE*MAP_SIZE + y*MAP_SIZE + z;
 
 function id_to_tex_num(block_id) {
-  const topped       = (_top, rest) => [rest, _top, rest, rest, rest, rest];
-  const top_n_bottom = (_top, rest) => [rest, _top, rest, rest, _top, rest];
+  const topped       = (_top, rest, btm=_top) => [rest, _top, rest, rest, btm, rest];
+  const xyz = (x, y, z) => [x, y, z, x, y, z];
 
   let tex_offset = 0;
   if (block_id == ID_ITEM_BONEMEAL  ) tex_offset = SS_COLUMNS*11 + 31;
@@ -512,8 +513,11 @@ function id_to_tex_num(block_id) {
   if (block_id == ID_ITEM_T0_PICK   ) tex_offset = SS_COLUMNS*6 + 16;
   if (block_id == ID_ITEM_T0_AXE    ) tex_offset = SS_COLUMNS*7 + 16;
   if (block_id == ID_BLOCK_WOOD     ) tex_offset = 4;
+  if (block_id == ID_BLOCK_TABLE    ) tex_offset = xyz(SS_COLUMNS*3 + 11,
+                                                       SS_COLUMNS*2 + 11,
+                                                       SS_COLUMNS*3 + 12);
   if (block_id == ID_BLOCK_STAIRS   ) tex_offset = 4;
-  if (block_id == ID_BLOCK_GRASS    ) tex_offset = topped(0, 2);
+  if (block_id == ID_BLOCK_GRASS    ) tex_offset = topped(0, 2, 2);
   if (block_id == ID_BLOCK_DIRT     ) tex_offset = 2;
   if (block_id == ID_BLOCK_STONE    ) tex_offset = 1;
   if (block_id == ID_BLOCK_GLASS    ) tex_offset = 3*SS_COLUMNS + 1;
@@ -521,7 +525,7 @@ function id_to_tex_num(block_id) {
   if (block_id == ID_BLOCK_FLOWER1  ) tex_offset = 13;
   if (block_id == ID_BLOCK_FLOWER2  ) tex_offset = 2*SS_COLUMNS + 7;
   if (block_id == ID_BLOCK_SAPLING  ) tex_offset = 15;
-  if (block_id == ID_BLOCK_LOG      ) tex_offset = top_n_bottom(SS_COLUMNS*1 + 5, SS_COLUMNS*1 + 4);
+  if (block_id == ID_BLOCK_LOG      ) tex_offset = topped(SS_COLUMNS*1 + 5, SS_COLUMNS*1 + 4);
   if (block_id == ID_BLOCK_LEAVES   ) tex_offset = 3*SS_COLUMNS + 4;
   const bdelta = block_id - ID_BLOCK_BREAKING;
   if (bdelta < 10 && bdelta >= 0) tex_offset = SS_COLUMNS*15 + bdelta;
@@ -529,24 +533,44 @@ function id_to_tex_num(block_id) {
   return tex_offset;
 }
 
+const SCREEN_WORLD      = 0;
+const SCREEN_INV        = 1;
+const SCREEN_TABLE      = 2;
+
+/* where crafting table, etc. store items */
+const SLOTS_INV = 9*4;
+const SLOTS_SCRATCH = 9 + 1 + 1;
+
 let state = {
   tick: 0,
-  pos:      [0, 3.1, 6],
-  last_pos: [0, 3.1, 6],
+  screen: SCREEN_INV,
+
   inv: {
-    items: [...Array(9)].fill(0),
+    items: [...Array(SLOTS_INV + SLOTS_SCRATCH)].fill(0),
     held_i: 0,
   },
+
+  map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
+  map_data: {}, /* same indices as map, has extra data tailored to map id */
   items: [
     { pos: [2.5, 1.2, 3.5], id: ID_BLOCK_WOOD , amount: 1 },
     { pos: [4.5, 1.2, 3.5], id: ID_BLOCK_GRASS, amount: 1 },
     { pos: [6.5, 1.2, 3.5], id: ID_BLOCK_DIRT , amount: 1 },
   ],
-  map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
-  map_data: {}, /* same indices as map, has extra data tailored to map id */
-  cam: { yaw_deg: 130, pitch_deg: -20 },
+
+  cam:      { yaw_deg: 130, pitch_deg: -20 },
+  last_cam: { yaw_deg: 130, pitch_deg: -20 },
+  pos:      [0, 3.1, 6],
+  last_pos: [0, 3.1, 6],
+
   keysdown: {},
-  mousedown: 0,
+  mousedown:          0,
+  mousedown_right:    0,
+  ts_mousedown_right: Date.now(),
+  mouseclick_double:  0,
+  mouseclick:         0,
+  mousepos: { x: 0, y: 0 },
+
   /* ticks for physics, timestamps for animations */
   mining:  { ts_start: Date.now(), ts_end: Date.now(), block_coord: undefined },
   using:   { ts_start: Date.now(), ts_end: Date.now() },
@@ -557,7 +581,7 @@ state.inv.items[1] = { id: ID_ITEM_T0_PICK, amount: 1 };
 state.inv.items[2] = { id: ID_ITEM_T0_AXE, amount: 1 };
 state.inv.items[3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
 state.inv.items[4] = { id: ID_BLOCK_SAPLING, amount: 10 };
-state.inv.items[5] = { id: ID_BLOCK_STAIRS, amount: 20 };
+state.inv.items[5] = { id: ID_BLOCK_LOG, amount: 20 };
 
 for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
   for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
@@ -580,7 +604,7 @@ for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++)
   let t_x = 3;
   let t_y = 1;
   let t_z = 1;
-  state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_STAIRS;
+  state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_TABLE;
 }
 function place_tree(t_x, t_y, t_z) {
   const height = 4 + (Math.random() < 0.4) +
@@ -727,16 +751,42 @@ function ray_to_map(ray_origin, ray_direction) {
   return ret;
 }
 
+window.ondblclick = e => state.mouseclick_double = 1;
+window.oncontextmenu = e => { e.preventDefault(); return false; };
 window.onmousedown = e => {
+  if (e.button == 0) state.mousedown = state.mouseclick = 1;
+
+  if (e.button == 2 && state.screen != SCREEN_WORLD) {
+    e.preventDefault();
+    state.mousedown_right = 1;
+    state.ts_mousedown_right = Date.now();
+    return false;
+  }
+
+  if (state.screen == SCREEN_WORLD)
+    document
+      .getElementById("p1")
+      .requestPointerLock({ unadjustedMovement: true });
+
+  e.preventDefault();
+
   if (!document.pointerLockElement) return;
-  if (e.button == 0) state.mousedown = 1;
+
+  const cast = ray_to_map(cam_eye(), cam_looking());
+  const p = [...cast.coord];
 
   const i = state.inv;
-  if (e.button == 2 && i.items[i.held_i]) {
-    e.preventDefault();
+  if (e.button == 2 && state.screen == SCREEN_WORLD) {
+    const src_index = map_index(p[0], p[1], p[2]);
+    if (state.map[src_index] == ID_BLOCK_TABLE) {
+      console.log("hit table");
+      state.screen = SCREEN_TABLE;
+      document.exitPointerLock();
+      return;
+    }
+  }
 
-    const cast = ray_to_map(cam_eye(), cam_looking());
-
+  if (e.button == 2 && state.screen == SCREEN_WORLD && i.items[i.held_i]) {
     if (cast.coord) {
       /* use up x1 of held item */ 
       const consume = () => {
@@ -747,8 +797,6 @@ window.onmousedown = e => {
         if (held.amount == 0)
           i.items[i.held_i] = 0;
       };
-
-      const p = [...cast.coord];
 
       const held = i.items[i.held_i];
       if (held.id <= ID_BLOCK_LAST) {
@@ -781,7 +829,6 @@ window.onmousedown = e => {
             axis[1] = Math.abs(axis[1]),
             axis[2] = Math.abs(axis[2]);
 
-          console.log('axis', ...axis);
           state.map_data[dst_index] = { axis };
         }
 
@@ -825,13 +872,18 @@ window.onmousedown = e => {
   }
 }
 window.onmouseup = e => {
-  if (!document.pointerLockElement) return;
+  if (e.button == 2) state.mousedown_right = 0;
   if (e.button == 0) state.mousedown = 0;
 
+  // if (!document.pointerLockElement) return;
   state.mining = { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() };
 }
 window.onmousemove = e => {
-  if (!document.pointerLockElement) return;
+  if (!document.pointerLockElement) {
+    state.mousepos.x = e.pageX;
+    state.mousepos.y = e.pageY;
+    return;
+  }
 
   /* used to roll back superfluous cam movement emitted on pointerlockchange (see handler) */ 
   state.last_cam = {...state.cam};
@@ -846,7 +898,20 @@ document.onpointerlockchange = () => {
     state.cam = {...state.last_cam};
 };
 window.onkeydown = e => {
-  state.keysdown[e.code] = 1;
+  if (document.pointerLockElement)
+    state.keysdown[e.code] = 1;
+
+  if (e.code == 'Tab') {
+    e.preventDefault();
+
+    if (!document.pointerLockElement) {
+      document.getElementById("p1").requestPointerLock({ unadjustedMovement: true });
+      state.screen = SCREEN_WORLD;
+    } else if (document.pointerLockElement) {
+      document.exitPointerLock();
+      state.screen = SCREEN_INV;
+    }
+  }
 
   if (e.code == 'Space')
     if (state.tick > state.jumping.tick_end && state.jumping.grounded) {
@@ -1099,14 +1164,18 @@ async function ss_sprite(gl) {
   const terrain = new Image(); terrain.src = './terrain.png';
   const  hotbar = new Image();  hotbar.src = './hotbar.png' ;
   const   items = new Image();   items.src = './items.png'  ;
+  const   table = new Image();   table.src = './table.png'  ;
   const    font = new Image();    font.src = './font.png'   ;
   const     sky = new Image();     sky.src = './sky.png'    ;
+  const     inv = new Image();     inv.src = './inv.png'    ;
   await Promise.all([
     new Promise(res => terrain.onload = res),
     new Promise(res =>  hotbar.onload = res),
     new Promise(res =>   items.onload = res),
+    new Promise(res =>   table.onload = res),
     new Promise(res =>    font.onload = res),
     new Promise(res =>     sky.onload = res),
+    new Promise(res =>     inv.onload = res),
   ]);
 
   if (spritesheet == undefined) {
@@ -1158,11 +1227,24 @@ async function ss_sprite(gl) {
 
   const w = terrain. width;
   const h = terrain.height;
-  ss_ctx.drawImage(terrain, 0, 0,   terrain.width, terrain.height);
-  ss_ctx.drawImage( hotbar, w, h,   terrain.width, terrain.height);
-  ss_ctx.drawImage(  items, w, 0,   terrain.width, terrain.height);
-  ss_ctx.drawImage(   font, 0, h,   terrain.width, terrain.height);
-  ss_ctx.drawImage(    sky, 0, h*2,     sky.width,     sky.height);
+  ss_ctx.drawImage(terrain, 0  , 0  , terrain.width, terrain.height);
+  ss_ctx.drawImage( hotbar, w  , h  , terrain.width, terrain.height);
+  ss_ctx.drawImage(  items, w  , 0  , terrain.width, terrain.height);
+  ss_ctx.drawImage(  table, w*3, 0  , terrain.width, terrain.height);
+  ss_ctx.drawImage(   font, 0  , h  , terrain.width, terrain.height);
+  ss_ctx.drawImage(    sky, 0  , h*2,     sky.width,     sky.height);
+  ss_ctx.drawImage(    inv, w*2, 0  , terrain.width, terrain.height);
+
+  {
+    const tex_o = SS_COLUMNS*11 + 24;
+    const u =           (tex_o % SS_COLUMNS) / SS_COLUMNS * SPRITESHEET_SIZE;
+    const v = Math.floor(tex_o / SS_COLUMNS) / SS_COLUMNS * SPRITESHEET_SIZE;
+    console.log({ u, v });
+    ss_ctx.globalAlpha = 0.2;
+    ss_ctx.fillStyle = "white";
+    ss_ctx.fillRect(u, v, 16, 16);
+  }
+
   gl_upload_image(gl, spritesheet, 0);
 }
 
@@ -1352,12 +1434,6 @@ function tick() {
   gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
   gl.bufferData(gl.ARRAY_BUFFER, geo.cpu_position, gl.DYNAMIC_DRAW);
 
-  canvas.addEventListener("click", () => {
-    canvas.requestPointerLock({
-      unadjustedMovement: true
-    });
-  });
-
   (window.onresize = () => {
     gl.viewport(
       0,
@@ -1383,6 +1459,7 @@ function tick() {
       tick();
     }
 
+    /* spritesheet shower helper thingy */
     if (0) {
       canvas.hidden = true;
       document.body.appendChild(spritesheet);
@@ -1564,56 +1641,52 @@ function tick() {
           geo.cpu_indices[idx_i++] = tile_idx_i+i_o;
       }
       function place_block(t_x, t_y, t_z, block_id, opts={}) {
-        const topped = (_top, rest) => [rest, _top, rest, rest, rest, rest];
+        const topped = (_top, rest, btm=_top) => [rest, _top, rest, rest, btm, rest];
 
-        if (block_id == ID_BLOCK_LOG || block_id == ID_BLOCK_STAIRS) {
-          const index = map_index(t_x, t_y, t_z);
-          if (state.map[index] == block_id && state.map_data[index]) {
+        if ((opts.block_data != undefined) && (block_id == ID_BLOCK_LOG || block_id == ID_BLOCK_STAIRS)) {
+          let x, y, z;
 
-            let x, y, z;
-
-            if (block_id == ID_BLOCK_LOG) {
-              /* orthogonal bases for a matrix to point "axis" up */
-              y = state.map_data[index].axis;
-              x = [...y];
-              {
-                let temp = x[2];
-                x[2] = x[1];
-                x[1] = x[0];
-                x[0] = temp;
-              }
-              z = cross3(y, x);
+          if (block_id == ID_BLOCK_LOG) {
+            /* orthogonal bases for a matrix to point "axis" up */
+            y = opts.block_data.axis;
+            x = [...y];
+            {
+              let temp = x[2];
+              x[2] = x[1];
+              x[1] = x[0];
+              x[0] = temp;
             }
-            if (block_id == ID_BLOCK_STAIRS) {
-              y = [0, 1, 0];
-              x = state.map_data[index].axis;
-              z = cross3(y, x);
-            }
-
-            const mat = mat4_from_translation(mat4_create(), [0.5, 0.5, 0.5]);
-            mat[0+0] = x[0];
-            mat[0+1] = x[1];
-            mat[0+2] = x[2];
-            mat[0+3] = mat[0+3];
-            mat[4+0] = y[0];
-            mat[4+1] = y[1];
-            mat[4+2] = y[2];
-            mat[4+3] = mat[4+3];
-            mat[8+0] = z[0];
-            mat[8+1] = z[1];
-            mat[8+2] = z[2];
-            mat[8+3] = mat[8+3];
-            opts.mat = mat;
+            z = cross3(y, x);
           }
+          if (block_id == ID_BLOCK_STAIRS) {
+            y = [0, 1, 0];
+            x = opts.block_data.axis;
+            z = cross3(y, x);
+          }
+
+          const mat = mat4_from_translation(mat4_create(), [0.5, 0.5, 0.5]);
+          mat[0+0] = x[0];
+          mat[0+1] = x[1];
+          mat[0+2] = x[2];
+          mat[0+3] = mat[0+3];
+          mat[4+0] = y[0];
+          mat[4+1] = y[1];
+          mat[4+2] = y[2];
+          mat[4+3] = mat[4+3];
+          mat[8+0] = z[0];
+          mat[8+1] = z[1];
+          mat[8+2] = z[2];
+          mat[8+3] = mat[8+3];
+          opts.mat = mat;
         }
 
         if (block_id == ID_BLOCK_FLOWER0) opts.model = models.x;
         if (block_id == ID_BLOCK_FLOWER1) opts.model = models.x;
         if (block_id == ID_BLOCK_FLOWER2) opts.model = models.x, opts.biomed = 1;
         if (block_id == ID_BLOCK_SAPLING) opts.model = models.x;
-        if (block_id == ID_BLOCK_STAIRS )  opts.model = models.stairs;
+        if (block_id == ID_BLOCK_STAIRS ) opts.model = models.stairs;
 
-        if (block_id == ID_BLOCK_GRASS) opts.biomed = topped(1, 0);
+        if (block_id == ID_BLOCK_GRASS) opts.biomed = topped(1, 0, 0);
         if (block_id > ID_BLOCK_LAST) opts.model = models.item;
 
         const tex_offset = id_to_tex_num(block_id);
@@ -1621,11 +1694,10 @@ function tick() {
 
         place_cube(t_x, t_y, t_z, tex_offset, opts);
         if (block_id == ID_BLOCK_GRASS) {
-          opts.biomed = 1;
-          place_cube(t_x, t_y, t_z, topped(-1, SS_COLUMNS*2 + 6), opts);
+          opts.biomed = [1, 1, 1, 1, 0, 1];
+          place_cube(t_x, t_y, t_z, topped(-1, SS_COLUMNS*2 + 6, -1), opts);
         }
       }
-
 
       /* update mining (removing/changing block as necessary) */
       const cast = ray_to_map(cam_eye(), cam_looking());
@@ -1642,6 +1714,7 @@ function tick() {
       {
         const { block_coord, ts_end } = state.mining;
         if ((state.mousedown)                                 &&
+            (state.screen == SCREEN_WORLD)                    &&
             (block_coord == undefined || ts_end < Date.now()) &&
             (cast.coord != undefined)
         ) {
@@ -1666,294 +1739,556 @@ function tick() {
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LOG   ) mine_time =  850;
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LEAVES) mine_time =  750;
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_WOOD  ) mine_time =  650;
+          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_TABLE ) mine_time =  650;
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_STAIRS) mine_time =  650;
 
           state.mining.ts_end = Date.now() + mine_time;
         }
       }
 
-      {
-        /* removing block being mined before rendering map */
-        let mining_index = undefined;
-        let mining_block_type = undefined;
-        if (state.mining.block_coord) {
-          const p = state.mining.block_coord;
-          mining_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+      for (let render_stage = 0; render_stage <= 2; render_stage++) {
+        /* skybox */
+        if (render_stage == 0) {
+          let view;
+          if (1) {
+            const eye = cam_eye();
+            view = mat4_create();
+            mat4_target_to(view, [0, 0, 0], cam_looking());
+            mat4_invert(view, view);
+          } else {
+            view = mat4_create();
+            mat4_target_to(view, [0, 0, 0], norm([0, 0, 1]));
+            mat4_invert(view, view);
+          }
 
-          mining_block_type = state.map[mining_index];
-          state.map[mining_index] = 0;
+          const SKYBOX_SIZE = 10_000;
+
+          const proj = mat4_create();
+          if (0) mat4_ortho(proj, -1.0, 1.0, -1.0, 1.0, -0.0, 100);
+          else {
+            mat4_perspective(
+              proj,
+              FIELD_OF_VIEW,
+              canvas.clientWidth / canvas.clientHeight,
+              0.1,
+              SKYBOX_SIZE
+            )
+          }
+
+          mat4_mul(proj, proj, view);
+          const view_proj = proj;
+          const mat = mat4_from_scaling(mat4_create(), [SKYBOX_SIZE, SKYBOX_SIZE, SKYBOX_SIZE]);
+          place_cube(0, 0, 0, [
+              32*SS_COLUMNS + 64,
+              32*SS_COLUMNS + 32, // top
+              64*SS_COLUMNS + 64,
+              64*SS_COLUMNS + 32,
+              32*SS_COLUMNS + 0,  // bottom
+              64*SS_COLUMNS + 0,
+          ], { tex_size_x: 512/16, tex_size_y: 512/16, view_proj, mat, darken: 0 });
         }
 
-        for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
-          for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) 
-            for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
-              const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
-              let block_id = state.map[index];
-              if (block_id != ID_BLOCK_NONE   &&  
-                  block_id != ID_BLOCK_LEAVES )
-                place_block(t_x, t_y, t_z, block_id);
+        /* render voxel map */
+        if (render_stage == 0 || render_stage == 2) {
+          /* removing block being mined before rendering map */
+          let mining_index = undefined;
+          let mining_block_type = undefined;
+          if (state.mining.block_coord) {
+            const p = state.mining.block_coord;
+            mining_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
+
+            mining_block_type = state.map[mining_index];
+            state.map[mining_index] = 0;
+          }
+
+          for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
+            for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) 
+              for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
+                const opts = {};
+                const index = map_index(t_x, t_y, t_z);
+                let block_id    = state.map     [index];
+                const block_data = state.map_data[index];
+                if (render_stage == 0           &&
+                    block_id != ID_BLOCK_NONE   &&  
+                    block_id != ID_BLOCK_LEAVES )
+                  place_block(t_x, t_y, t_z, block_id, opts);
+                if (render_stage == 2          &&
+                    block_id == ID_BLOCK_LEAVES )
+                  place_block(t_x, t_y, t_z, block_id, opts);
+              }
+
+          if (render_stage == 2) {
+            /* render block being mined with animation */
+            if (mining_index && mining_block_type) {
+              let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
+              t = Math.min(1, t);
+              t = ease_out_sine(t);
+              const t_x = state.mining.block_coord[0];
+              const t_y = state.mining.block_coord[1];
+              const t_z = state.mining.block_coord[2];
+              if (t < 0.98) {
+                const index = map_index(t_x, t_y, t_z);
+                const opts = {};
+                opts.block_data = state.map_data[index];
+                place_block(t_x, t_y, t_z, mining_block_type, opts);
+              }
+              const stage = Math.floor(lerp(0, 9, t));
+              place_block(t_x, t_y, t_z, ID_BLOCK_BREAKING + stage);
             }
-        /* undo "removing block being mined before rendering map" */
-        if (mining_index)
-          state.map[mining_index] = mining_block_type;
-      }
+          }
 
-      /* render indicator of what block you are looking at */
-      if (cast.index != undefined                  &&
-          cast.index <  MAP_SIZE*MAP_SIZE*MAP_SIZE &&
-          cast.index >= 0                          &&
-          !state.mousedown
-      ) {
-        const p = [...cast.coord];
-        const thickness = 0.04;
-        p[cast.side] -= cast.dir*0.5;
-
-        const scale = [1, 1, 1];
-        scale[cast.side] = 0.004;
-        const mat = mat4_from_translation(mat4_create(), [0.5, 0.5, 0.5]);
-        mat[0]  = scale[0];
-        mat[5]  = scale[1];
-        mat[10] = scale[2];
-        place_block(...p, ID_BLOCK_GLASS, { darken: 0, mat, transparent: 1 });
-      }
-      
-      const view_proj = mat4_create();
-      const hotbar_size = 45*4 + 2;
-      const ui_w = canvas.width /4;
-      const ui_h = canvas.height/4;
-      const offset = Math.floor((hotbar_size - ui_w)/2);
-      mat4_ortho(
-        view_proj,
-        offset + 0, offset + ui_w,
-                 0,          ui_h,
-        0, 1
-      );
-
-      const ui_cube = (x, y, id) => {
-        const mat       = mat4_create();
-        mat4_mul(mat, mat, mat4_from_translation(_scratch, [x + 8, y + 8, -0.00001]));
-        mat4_mul(mat, mat, mat4_from_scaling    (_scratch, [  9.5,   9.5,  0.00001]));
-        mat4_mul(mat, mat, mat4_from_x_rotation (_scratch, Math.PI/5));
-        mat4_mul(mat, mat, mat4_from_y_rotation (_scratch, Math.PI/4));
-
-        place_block(0, 0, 0, id, { view_proj, mat });
-      }
-
-      /* skybox */
-      {
-        let view;
-        if (1) {
-          const eye = cam_eye();
-          view = mat4_create();
-          mat4_target_to(view, [0, 0, 0], cam_looking());
-          mat4_invert(view, view);
-        } else {
-          view = mat4_create();
-          mat4_target_to(view, [0, 0, 0], norm([0, 0, 1]));
-          mat4_invert(view, view);
+          /* undo "removing block being mined before rendering map" */
+          if (mining_index)
+            state.map[mining_index] = mining_block_type;
         }
 
-        const SKYBOX_SIZE = 10_000;
+        /* render indicator of what block you are looking at */
+        if (render_stage == 2                        &&
+            state.screen == SCREEN_WORLD             &&
+            cast.index != undefined                  &&
+            cast.index <  MAP_SIZE*MAP_SIZE*MAP_SIZE &&
+            cast.index >= 0                          &&
+            !state.mousedown
+        ) {
+          const p = [...cast.coord];
+          const thickness = 0.04;
+          p[cast.side] -= cast.dir*0.5;
 
-        const proj = mat4_create();
-        if (0) mat4_ortho(proj, -1.0, 1.0, -1.0, 1.0, -0.0, 100);
-        else {
+          const scale = [1, 1, 1];
+          scale[cast.side] = 0.004;
+          const mat = mat4_from_translation(mat4_create(), [0.5, 0.5, 0.5]);
+          mat[0]  = scale[0];
+          mat[5]  = scale[1];
+          mat[10] = scale[2];
+          place_block(...p, ID_BLOCK_GLASS, { darken: 0, mat, transparent: 1 });
+        }
+        
+        if (render_stage == 2) {
+          for (const { pos, id } of state.items) {
+            const mat = mat4_from_y_rotation(mat4_create(), Date.now()/1000);
+            mat4_mul(mat, mat, mat4_from_translation(mat4_create(), [0.0, 0.5, 0.0]));
+            mat4_mul(mat, mat, mat4_from_scaling(mat4_create(), [0.3, 0.3, 0.3]));
+            place_block(...pos, id, { mat });
+          }
+        }
+
+        /* show item in hand */
+        if (render_stage == 2 && state.inv.items[state.inv.held_i]) {
+          const item_id = state.inv.items[state.inv.held_i].id;
+
+          const proj = mat4_create();
+          const aspect = canvas.clientWidth / canvas.clientHeight;
           mat4_perspective(
             proj,
-            FIELD_OF_VIEW,
-            canvas.clientWidth / canvas.clientHeight,
-            0.1,
-            SKYBOX_SIZE
-          )
-        }
-
-        mat4_mul(proj, proj, view);
-        const view_proj = proj;
-        const mat = mat4_from_scaling(mat4_create(), [SKYBOX_SIZE, SKYBOX_SIZE, SKYBOX_SIZE]);
-        place_cube(0, 0, 0, [
-            32*SS_COLUMNS + 64,
-            32*SS_COLUMNS + 32, // top
-            64*SS_COLUMNS + 64,
-            64*SS_COLUMNS + 32,
-            32*SS_COLUMNS + 0,  // bottom
-            64*SS_COLUMNS + 0,
-        ], { tex_size_x: 512/16, tex_size_y: 512/16, view_proj, mat, darken: 0 });
-      }
-
-      {
-        /* removing block being mined before rendering map */
-        let mining_index = undefined;
-        let mining_block_type = undefined;
-        if (state.mining.block_coord) {
-          const p = state.mining.block_coord;
-          mining_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
-
-          mining_block_type = state.map[mining_index];
-          state.map[mining_index] = 0;
-        }
-
-        for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
-          for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) 
-            for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
-              const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
-              let block_id = state.map[index];
-              if (block_id == ID_BLOCK_LEAVES)
-                place_block(t_x, t_y, t_z, block_id);
-            }
-        /* undo "removing block being mined before rendering map" */
-        if (mining_index)
-          state.map[mining_index] = mining_block_type;
-
-        /* render block being mined with animation */
-        if (mining_index && mining_block_type) {
-          let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
-          t = Math.min(1, t);
-          t = ease_out_sine(t);
-          if (t < 0.98) place_block(...state.mining.block_coord, mining_block_type);
-          const stage = Math.floor(lerp(0, 9, t));
-          place_block(...state.mining.block_coord, ID_BLOCK_BREAKING + stage);
-        }
-      }
-
-      for (const { pos, id } of state.items) {
-        const mat = mat4_from_y_rotation(mat4_create(), Date.now()/1000);
-        mat4_mul(mat, mat, mat4_from_translation(mat4_create(), [0.0, 0.5, 0.0]));
-        mat4_mul(mat, mat, mat4_from_scaling(mat4_create(), [0.3, 0.3, 0.3]));
-        place_block(...pos, id, { mat });
-      }
-
-      /* show item in hand */
-      if (state.inv.items[state.inv.held_i]) {
-        const item_id = state.inv.items[state.inv.held_i].id;
-
-        const proj = mat4_create();
-        const aspect = canvas.clientWidth / canvas.clientHeight;
-        mat4_perspective(
-          proj,
-          45 / 180 * Math.PI,
-          aspect,
-          1.0,
-          100_000
-        );
-        const view_proj = proj;
-
-        let swing_rot = 0;
-        let scale = 0.4;
-
-        if (item_id == ID_ITEM_T0_SPADE) scale = 0.8, swing_rot = -90;
-        if (item_id == ID_ITEM_T0_PICK ) scale = 0.8, swing_rot = -20;
-        if (item_id == ID_ITEM_T0_AXE  ) scale = 0.8, swing_rot = -20;
-
-        if (state.mining.ts_end > Date.now()) {
-
-          let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
-          t = Math.min(1, 8*(1 - 2*Math.abs(0.5 - t)));
-
-          swing_rot += 20*t*Math.cos(Date.now() * 0.03);
-        }
-
-        if (state.using.ts_end > Date.now()) {
-          let t = inv_lerp(state.using.ts_start, state.using.ts_end, Date.now());
-          t = (1 - 2.2*Math.abs(0.5 - t));
-          t = ease_out_sine(t);
-          swing_rot -= 40*t;
-        }
-
-        const mat = mat4_from_translation(mat4_create(), [aspect*0.55, -0.425, -1.85]);
-        mat4_mul(mat, mat, mat4_from_y_rotation(_scratch,        40 / 180 * Math.PI));
-        mat4_mul(mat, mat, mat4_from_x_rotation(_scratch, swing_rot / 180 * Math.PI));
-        mat4_mul(mat, mat, mat4_from_scaling(_scratch, [scale, scale, scale]));
-
-        place_block(0, 0, 0, item_id, { no_view_proj: 1, mat, view_proj });
-      }
-
-      const ui_str = (str, x, y, size, opts={}) => {
-        let cursor = 0;
-        for (const i in str) {
-          const chr = str[i];
-          const code = chr.charCodeAt(0);
-          const code_x = code % 16;
-          const code_y = Math.floor(code / 16);
-
-          const tex = SS_COLUMNS*(code_y + 16) + code_x;
-          place_ui_quad(
-            view_proj,
-            x + size*cursor, y,
-            size, size,
-            tex,
-            opts
+            45 / 180 * Math.PI,
+            aspect,
+            1.0,
+            100_000
           );
-          cursor += letter_widths[code]/8;
+          const view_proj = proj;
+
+          let swing_rot = 0;
+          let scale = 0.4;
+
+          if (item_id == ID_ITEM_T0_SPADE) scale = 0.8, swing_rot = -90;
+          if (item_id == ID_ITEM_T0_PICK ) scale = 0.8, swing_rot = -20;
+          if (item_id == ID_ITEM_T0_AXE  ) scale = 0.8, swing_rot = -20;
+
+          if (state.mining.ts_end > Date.now()) {
+
+            let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
+            t = Math.min(1, 8*(1 - 2*Math.abs(0.5 - t)));
+
+            swing_rot += 20*t*Math.cos(Date.now() * 0.03);
+          }
+
+          if (state.using.ts_end > Date.now()) {
+            let t = inv_lerp(state.using.ts_start, state.using.ts_end, Date.now());
+            t = (1 - 2.2*Math.abs(0.5 - t));
+            t = ease_out_sine(t);
+            swing_rot -= 40*t;
+          }
+
+          const mat = mat4_from_translation(mat4_create(), [aspect*0.55, -0.425, -1.85]);
+          mat4_mul(mat, mat, mat4_from_y_rotation(_scratch,        40 / 180 * Math.PI));
+          mat4_mul(mat, mat, mat4_from_x_rotation(_scratch, swing_rot / 180 * Math.PI));
+          mat4_mul(mat, mat, mat4_from_scaling(_scratch, [scale, scale, scale]));
+
+          place_block(0, 0, 0, item_id, { no_view_proj: 1, mat, view_proj });
         }
-        return cursor;
-      };
 
-      /* hotbar bg tex */
-      {
-        const size = 21;
-        const slot = 16*SS_COLUMNS + 16;
+        const view_proj = mat4_create();
+        const ui_w = canvas.width /4;
+        const ui_h = canvas.height/4;
+        const pixel_round = size => Math.floor(size*4)/4;
+        const view_proj_center_x = size_x => {
+          const offset = pixel_round((size_x - ui_w)/2);
+          mat4_ortho(
+            view_proj,
+            offset + 0, offset + ui_w,
+                     0,          ui_h,
+            0, 1
+          );
+        }
 
-        const size_x = hotbar_size;
-        const opts = { tex_size_x: size_x/16, tex_size_y: size/16, z: -0.9997 };
-        place_ui_quad(view_proj, 0, 2, size_x, size, slot, opts);
-      }
+        const ui_str = (str, x, y, size, opts={}) => {
+          let cursor = 0;
+          for (const i in str) {
+            const chr = str[i];
+            const code = chr.charCodeAt(0);
+            const code_x = code % 16;
+            const code_y = Math.floor(code / 16);
 
-      /* hotbar items preview */
-      for (let i = 0; i < 9; i++) {
-        const itm = state.inv.items[i];
-        if (itm) {
-          const id = state.inv.items[i].id;
+            const tex = SS_COLUMNS*(code_y + 16) + code_x;
+            place_ui_quad(
+              view_proj,
+              x + size*cursor, y,
+              size, size,
+              tex,
+              opts
+            );
+            cursor += letter_widths[code]/8;
+          }
+          return cursor;
+        };
+        const ui_cube = (x, y, id) => {
+          const mat       = mat4_create();
+          mat4_mul(mat, mat, mat4_from_translation(_scratch, [x + 8, y + 8, -0.00001]));
+          mat4_mul(mat, mat, mat4_from_scaling    (_scratch, [  9.5,   9.5,  0.00001]));
+          mat4_mul(mat, mat, mat4_from_x_rotation (_scratch, Math.PI/5));
+          mat4_mul(mat, mat, mat4_from_y_rotation (_scratch, Math.PI/4));
+
+          place_block(0, 0, 0, id, { view_proj, mat });
+        }
+
+        function ui_item(x, y, itm) {
+          const id = itm.id;
           const item_tex = id_to_tex_num(id);
 
-          const x = 3 + i*20;
           if (id <= ID_BLOCK_LAST)
-            ui_cube(x, 4, id);
+            ui_cube(x, y, id);
           else
-            place_ui_quad(view_proj, x, 4, 16, 16, item_tex, { z: -0.9998 });
+            place_ui_quad(view_proj, x, y, 16, 16, item_tex, { z: -0.9997 });
 
           if (itm.amount > 1)
-            ui_str(""+itm.amount, x, 4, 8, { z: -1.0 });
+            ui_str(""+itm.amount, x, y, 8, { z: -1.0 });
         }
+
+        if (render_stage == 2 && state.screen == SCREEN_WORLD) {
+          const hotbar_size = 45*4 + 2;
+          view_proj_center_x(hotbar_size);
+
+          /* hotbar bg tex */
+          {
+            const size = 21;
+            const slot = 16*SS_COLUMNS + 16;
+
+            const size_x = hotbar_size;
+            const opts = { tex_size_x: size_x/16, tex_size_y: size/16, z: -0.9997 };
+            place_ui_quad(view_proj, 0, 2, size_x, size, slot, opts);
+          }
+
+          /* hotbar items preview */
+          for (let i = 0; i < 9; i++) {
+            const itm = state.inv.items[i];
+            if (itm) {
+              const x = 3 + i*20;
+              ui_item(x, 4, itm);
+            }
+          }
+
+          /* selected slot tex */
+          {
+            const x = 0;
+            const size = 25;
+            const slot = 17*SS_COLUMNS + 16;
+
+            const quad_x = state.inv.held_i*20 - 1;
+            const opts = {
+              tex_size_x: size/16,
+              tex_size_y: size/16,
+              corner_uvs: [
+                {u: 0.125        , v: 0.13525390625},
+                {u: 0.13720703125, v: 0.13525390625},
+                {u: 0.13720703125, v: 0.1474609375 },
+                {u: 0.125        , v: 0.1474609375 }
+              ],
+              z: -0.9999
+            };
+            place_ui_quad(view_proj, quad_x, 0, size, size, slot, opts);
+          }
+        }
+
+        const inv_screen = state.screen == SCREEN_INV || state.screen == SCREEN_TABLE;
+        if (render_stage == 2 && inv_screen) {
+          const z = -0.9997;
+
+          const size_x = 176;
+          view_proj_center_x(size_x);
+          const size_y = 166;
+          const btm_pad = pixel_round((ui_h - size_y)/2);
+
+          /* render inv bg */
+          {
+            let tex_o;
+            if (state.screen == SCREEN_INV  ) tex_o = 0*SS_COLUMNS + 16*2;
+            if (state.screen == SCREEN_TABLE) tex_o = 0*SS_COLUMNS + 16*3;
+
+            const opts = { tex_size_x: size_x/16,
+                           tex_size_y: size_y/16,
+                           z };
+            place_ui_quad(view_proj, 0, btm_pad, size_x, size_y, tex_o, opts);
+          }
+
+          let scratch_i = state.inv.items.length - SLOTS_SCRATCH;
+          const pickup_i = scratch_i++;
+
+          const mp = [state.mousepos.x, state.mousepos.y, 0, 1];
+          {
+
+            /* invert p */
+            {
+              mp[0] = (mp[0] / window.innerWidth )*2 - 1;
+              mp[1] = 1 - (mp[1] / window.innerHeight)*2;
+
+              const inv = mat4_create();
+              mat4_invert(inv, view_proj);
+              mat4_transform_vec4(mp, mp, inv);
+            }
+          }
+
+          const slot = (x, y, inv_i) => {
+            const itm = state.inv.items[inv_i];
+            const tex_o = SS_COLUMNS*11 + 24;
+
+            if (mp[0] > x && mp[0] < (x+16) &&
+                mp[1] > y && mp[1] < (y+16)  ) {
+              place_ui_quad(view_proj, x, y, 16, 16, tex_o, { z });
+
+              const itms = state.inv.items;
+
+              const inv_id    = itms[inv_i   ] && itms[inv_i   ].id;
+              const pickup_id = itms[pickup_i] && itms[pickup_i].id;
+
+              if (state.mouseclick_double) {
+                const dst_i = itms[pickup_i] ? pickup_i : inv_i;
+
+                for (let i = SLOTS_INV-1; i >= 0; i--) {
+                  if (i == dst_i) continue;
+
+                  if (itms[i] && itms[i].id == inv_id) {
+                    itms[dst_i].amount += itms[i].amount;
+                    itms[i] = 0;
+                  }
+                }
+              }
+              else if (state.mouseclick) {
+                if (inv_id == pickup_id && inv_id != 0) {
+                  /* combine! */
+                  itms[inv_i].amount += itms[pickup_i].amount;
+                  itms[pickup_i] = 0;
+                } else {
+                  /* swap! */
+                  const tmp = itms[inv_i];
+                  itms[inv_i] = itms[pickup_i];
+                  itms[pickup_i] = tmp;
+                }
+              }
+
+              const lastdrophash = inv_i + '|' + state.ts_mousedown_right;
+              if (state.mousedown_right && window.lastdrophash != lastdrophash) {
+                window.lastdrophash = lastdrophash;
+
+                if (itms[pickup_i]) {
+                  if (itms[inv_i] == 0) {
+                    itms[pickup_i].amount--;
+                    itms[inv_i] = { id: itms[pickup_i].id, amount: 1 };
+                  }
+                  else if (inv_id == pickup_id && inv_id != undefined) {
+                    itms[pickup_i].amount--;
+                    itms[inv_i].amount++;
+                  }
+                } else if (itms[inv_i].id && itms[inv_i].amount > 1) {
+                  itms[pickup_i] = { id: itm.id, amount: Math.floor(itm.amount/2) };
+                  itms[inv_i].amount = Math.ceil(itm.amount/2);
+                }
+              }
+
+              if (itms[pickup_i])
+                if (itms[pickup_i].amount == 0)
+                  itms[pickup_i] = 0;
+
+              if (itms[inv_i])
+                if (itms[inv_i].amount == 0)
+                  itms[inv_i] = 0;
+            }
+
+            if (state.inv.items[inv_i] && state.inv.items[inv_i].id)
+              ui_item(x, y, state.inv.items[inv_i]);
+          }
+          const slot_out = (x, y, inv_i) => {
+            let ret = 0;
+
+            const itms = state.inv.items;
+            const tex_o = SS_COLUMNS*11 + 24;
+
+            if (mp[0] > x && mp[0] < (x+16) &&
+                mp[1] > y && mp[1] < (y+16)  ) {
+              place_ui_quad(view_proj, x, y, 16, 16, tex_o, { z });
+
+              if (state.mouseclick) {
+                const inv_id    = itms[inv_i   ] && itms[inv_i   ].id;
+                const pickup_id = itms[pickup_i] && itms[pickup_i].id;
+
+                if ((inv_id == pickup_id && inv_id != 0) || itms[pickup_i] == 0) {
+                  /* combine! */
+                  if (itms[pickup_i] == 0)
+                    itms[pickup_i] = itms[inv_i];
+                  else
+                    itms[pickup_i].amount += itms[inv_i].amount;
+
+                  ret = 1;
+                }
+              }
+            }
+
+            if (state.inv.items[inv_i] && state.inv.items[inv_i].id)
+              ui_item(x, y, state.inv.items[inv_i]);
+
+            return ret;
+          };
+
+          let i = 0;
+          const inv_row = i_y => {
+            for (let i_x = 0; i_x < 9; i_x++) {
+              const x = 8 + i_x*18;
+              const y = btm_pad + i_y;
+
+              slot(x, y, i++);
+            }
+          };
+
+          inv_row(8); /* hotbar */
+          for (let i_y = 0; i_y < 3; i_y++)
+            inv_row(66 - i_y*18); /* inv rows */
+
+          /* crafting grid */
+          let tbl_i = scratch_i;
+          let tbl_extent = 0;
+          if (state.screen == SCREEN_INV  ) {
+            tbl_extent = 2;
+
+            for (let i_y = 0; i_y < 2; i_y++)
+              for (let i_x = 0; i_x < 2; i_x++) {
+                const i = scratch_i++;
+                slot(88 + 18*i_x, 133 - 18*i_y, i);
+              }
+          }
+          if (state.screen == SCREEN_TABLE  ) {
+            tbl_extent = 3;
+
+            for (let i_y = 0; i_y < 3; i_y++)
+              for (let i_x = 0; i_x < 3; i_x++) {
+                const i = scratch_i++;
+                slot(30 + 18*i_x, 141 - 18*i_y, i);
+              }
+          }
+          let tbl_end_i = scratch_i;
+          const tbl_slot_count = tbl_end_i - tbl_i;
+
+           /* crafting output */
+           {
+            const itms = state.inv.items;
+
+            let tbl_x_min = 3, tbl_y_min = 3;
+            let tbl_x_max = 0, tbl_y_max = 0;
+            for (let i_x = 0; i_x < tbl_extent; i_x++)
+              for (let i_y = 0; i_y < tbl_extent; i_y++) {
+                const i = tbl_i + i_y*tbl_extent + i_x;
+                if (state.inv.items[i] != 0)
+                  tbl_x_min = Math.min(  i_x, tbl_x_min),
+                  tbl_y_min = Math.min(  i_y, tbl_y_min),
+                  tbl_x_max = Math.max(1+i_x, tbl_x_max),
+                  tbl_y_max = Math.max(1+i_y, tbl_y_max);
+              }
+            const tbl_w = Math.max(0, tbl_x_max - tbl_x_min);
+            const tbl_h = Math.max(0, tbl_y_max - tbl_y_min);
+            const pattern = Array(tbl_w*tbl_h);
+            for (let i_x = 0; i_x < tbl_w; i_x++)
+              for (let i_y = 0; i_y < tbl_h; i_y++) {
+                const grid_i = (tbl_y_min + i_y)*tbl_extent + (tbl_x_min + i_x);
+                const itms_i = tbl_i + grid_i;
+
+                const pattern_i = i_y*tbl_w + i_x;
+                pattern[pattern_i] = itms[itms_i] && itms[itms_i].id;
+              }
+
+            const recipes = [
+              {
+                out: { id: ID_BLOCK_WOOD, amount: 4 },
+                pattern_w: 1,
+                pattern_h: 1,
+                ingredients: [ID_BLOCK_LOG],
+                pattern: [0]
+              },
+              {
+                out: { id: ID_BLOCK_TABLE, amount: 1 },
+                pattern_w: 2,
+                pattern_h: 2,
+                ingredients: [ID_BLOCK_WOOD],
+                pattern: [
+                  0,0,
+                  0,0,
+                ]
+              },
+              {
+                out: { id: ID_BLOCK_STAIRS, amount: 4 },
+                pattern_w: 3,
+                pattern_h: 3,
+                ingredients: [ID_BLOCK_NONE, ID_BLOCK_WOOD],
+                pattern: [
+                  1,0,0,
+                  1,1,0,
+                  1,1,1,
+                ]
+              },
+            ];
+
+            let out = 0;
+            for (const r of recipes) {
+              if (r.pattern_w != tbl_w) continue;
+              if (r.pattern_h != tbl_h) continue;
+              if (r.pattern.some((x, i) => r.ingredients[x] != pattern[i])) continue;
+              out = r.out;
+              break;
+            }
+
+            // console.log({ out, log_slots });
+            const out_i = scratch_i++;
+            state.inv.items[out_i] = out;
+
+            let click;
+            if (state.screen == SCREEN_INV  ) click = slot_out(88 + 56, 133 - 10, out_i);
+            if (state.screen == SCREEN_TABLE) click = slot_out(70 + 56, 133 - 10, out_i);
+
+            /* take 1 from each slot */
+            if (click)
+              for (let slot = 0; slot < tbl_slot_count; slot++) {
+                const tbl_slot_i = tbl_i + slot;
+
+                if (itms[tbl_slot_i]) {
+                  itms[tbl_slot_i].amount--;
+                  if (itms[tbl_slot_i].amount == 0)
+                    itms[tbl_slot_i] = 0;
+                }
+              }
+          }
+
+          if (state.inv.items[pickup_i])
+            ui_item(mp[0]-8, mp[1]-8, state.inv.items[pickup_i]);
+        }
+        
       }
-
-      /* selected slot tex */
-      {
-        const x = 0;
-        const size = 25;
-        const slot = 17*SS_COLUMNS + 16;
-
-        const quad_x = state.inv.held_i*20 - 1;
-        const opts = {
-          tex_size_x: size/16,
-          tex_size_y: size/16,
-          corner_uvs: [
-            {u: 0.125        , v: 0.13525390625},
-            {u: 0.13720703125, v: 0.13525390625},
-            {u: 0.13720703125, v: 0.1474609375 },
-            {u: 0.125        , v: 0.1474609375 }
-          ],
-          z: -0.9999
-        };
-        place_ui_quad(view_proj, quad_x, 0, size, size, slot, opts);
-      }
-
-        // if (state.inv.items[i]) {
-        //   const id = state.inv.items[i].id;
-        //   if (id <= ID_BLOCK_LAST)
-        //     ui_cube(x, 0, id);
-        //   else {
-        //     const item_size = size * (12/16);
-        //     const item_pad = (size - item_size)/2;
-        //     place_ui_quad(
-        //       view_proj,
-        //       x + item_pad,
-        //       0 + item_pad,
-        //       item_size, item_size,
-        //       SS_COLUMNS*11 + 31,
-        //       { transparent, darken }
-        //     );
-        //   }
-        // }
 
       // Create a buffer for the square's positions.
       gl.bindBuffer(gl.ARRAY_BUFFER, geo.gpu_position);
@@ -1962,10 +2297,14 @@ function tick() {
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geo.gpu_indices);
       gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, geo.cpu_indices);
 
+      geo.cpu_indices.fill(0);
+      geo.cpu_position.fill(0);
+
       geo.vrts_used = vrt_i;
       geo.idxs_used = idx_i;
     }
 
     draw_scene(gl, program_info, geo);
+    state.mouseclick = state.mouseclick_double = 0;
   });
 })();
