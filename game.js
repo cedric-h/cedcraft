@@ -506,7 +506,6 @@ const ID_ITEM_T0_AXE    = _id++;
 const FIELD_OF_VIEW = 75 / 180 * Math.PI;
 
 const MAP_SIZE = 16;
-const map_index = (x, y, z) => x*MAP_SIZE*MAP_SIZE + y*MAP_SIZE + z;
 
 function id_to_tex_num(block_id) {
   const topped       = (_top, rest, btm=_top) => [rest, _top, rest, rest, btm, rest];
@@ -564,7 +563,7 @@ const FURNACE_INDEX_COUNT = 3;
 let state = {
   tick: 0,
   screen: SCREEN_WORLD,
-  screen_block_index: 0,
+  screen_block_coord: 0,
 
   inv: {
     items: [...Array(SLOTS_INV + SLOTS_SCRATCH)].fill(0),
@@ -603,6 +602,11 @@ let state = {
   using:   { ts_start: Date.now(), ts_end: Date.now() },
   jumping: { tick_start:        0, tick_end:        0, tick_grounded: 0 },
 };
+const map_index = (x, y, z) => x*MAP_SIZE*MAP_SIZE + y*MAP_SIZE + z;
+const map_get  = (x, y, z   ) => state.map     [map_index(x, y, z)];
+const map_set  = (x, y, z, v) => state.map     [map_index(x, y, z)] = v;
+const map_data = (x, y, z   ) => state.map_data[map_index(x, y, z)] ??= {};
+
 state.inv.items[1+0] = { id: ID_ITEM_T0_SPADE, amount: 1 };
 state.inv.items[1+1] = { id: ID_ITEM_T0_PICK, amount: 1 };
 state.inv.items[1+2] = { id: ID_ITEM_T0_AXE, amount: 1 };
@@ -625,37 +629,12 @@ function state_drop(i, amt) {
   }
 }
 
-for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
-  for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
-    const t_y = 0;
-
-    const top_i = map_index(t_x, t_y+1, t_z);
-    if (Math.random() < ( 8/(MAP_SIZE*MAP_SIZE)))
-      state.map[top_i] = (Math.random() < 0.5) ? ID_BLOCK_FLOWER0 : ID_BLOCK_FLOWER1;
-    if (Math.random() < (16/(MAP_SIZE*MAP_SIZE)))
-      state.map[top_i] = ID_BLOCK_FLOWER2;
-
-    state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_GRASS;
-  }
-for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
-  for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) {
-    const t_z = 0;
-    state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_STONE;
-
-    if (Math.random() < 0.04) state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_ORE_T2  ;
-  }
-{
-  let t_x = 3;
-  let t_y = 1;
-  let t_z = 1;
-  state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_FURNACE0;
-}
 function place_tree(t_x, t_y, t_z) {
   const height = 4 + (Math.random() < 0.4) +
                      (Math.random() < 0.3);
 
   for (let i = 0; i < height; i++)
-    state.map[map_index(t_x, t_y++, t_z)] = ID_BLOCK_LOG;
+    map_set(t_x, t_y++, t_z, ID_BLOCK_LOG);
   t_y -= 2;
 
   const heart = [t_x, t_y, t_z];
@@ -674,12 +653,45 @@ function place_tree(t_x, t_y, t_z) {
         if (mag3(scaled) > 2.15 + rng()) continue;
 
         p[1] += 2;
-        const index = map_index(...add3(p, heart));
-        if (state.map[index] != ID_BLOCK_NONE) continue;
-        state.map[index] = ID_BLOCK_LEAVES;
+        {
+          const [x, y, z] = add3(p, heart);
+          if (map_get(x, y, z) != ID_BLOCK_NONE) continue;
+          map_set(x, y, z, ID_BLOCK_LEAVES);
+        }
       }
 }
-// place_tree(10, 1, 3);
+function chunk_gen() {
+  for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
+    for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
+      const t_y = 0;
+
+      let flower;
+      {
+        if (Math.random() < ( 8/(MAP_SIZE*MAP_SIZE)))
+          flower = (Math.random() < 0.5) ? ID_BLOCK_FLOWER0 : ID_BLOCK_FLOWER1;
+        if (Math.random() < (16/(MAP_SIZE*MAP_SIZE)))
+          flower = ID_BLOCK_FLOWER2;
+      }
+      if (flower) map_set(t_x, t_y+1, t_z, flower);
+
+      map_set(t_x, t_y, t_z, ID_BLOCK_GRASS);
+    }
+  for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
+    for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) {
+      const t_z = 0;
+      map_set(t_x, t_y, t_z, ID_BLOCK_STONE);
+
+      if (Math.random() < 0.04) map_set(t_x, t_y, t_z, ID_BLOCK_ORE_T2);
+    }
+  {
+    let t_x = 3;
+    let t_y = 1;
+    let t_z = 1;
+    map_set(t_x, t_y, t_z, ID_BLOCK_FURNACE0);
+  }
+  // place_tree(10, 1, 3);
+}
+chunk_gen();
 
 /* used for player & particle vs. world collision */
 function pin_to_empty(ent) {
@@ -696,18 +708,18 @@ function pin_to_empty(ent) {
     const new_block = [Math.floor(coord[0]),
                        Math.floor(coord[1]),
                        Math.floor(coord[2])];
-    const index = map_index(new_block[0], new_block[1], new_block[2]);
+    const md = map_data(new_block[0], new_block[1], new_block[2]);
+    const block = map_get(new_block[0], new_block[1], new_block[2])
 
     let hard = 1;
     const   delta = new_pos[i] - pos[i];
-    if (state.map[index] == ID_BLOCK_NONE)    hard = 0;
-    if (state.map[index] == ID_BLOCK_SAPLING) hard = 0;
-    if (state.map[index] == ID_BLOCK_FLOWER0) hard = 0;
-    if (state.map[index] == ID_BLOCK_FLOWER1) hard = 0;
-    if (state.map[index] == ID_BLOCK_FLOWER2) hard = 0;
-    if (state.map[index] == ID_BLOCK_STAIRS) {
+    if (block == ID_BLOCK_NONE)    hard = 0;
+    if (block == ID_BLOCK_SAPLING) hard = 0;
+    if (block == ID_BLOCK_FLOWER0) hard = 0;
+    if (block == ID_BLOCK_FLOWER1) hard = 0;
+    if (block == ID_BLOCK_FLOWER2) hard = 0;
+    if (block == ID_BLOCK_STAIRS) {
       /*  i == 0 && delta < 0 */
-      const md = state.map_data[index];
 
       if (md && md.axis) {
         const stair_i = (md.axis[0] != 0) ? 0 : 2;
@@ -737,9 +749,6 @@ function ray_to_map(ray_origin, ray_direction) {
     side: undefined,
     dir: undefined,
 
-    index: undefined,
-    last_index: undefined,
-
     coord: [0, 0, 0],
     last_coord: [0, 0, 0],
   };
@@ -748,19 +757,19 @@ function ray_to_map(ray_origin, ray_direction) {
   const map = [Math.floor(ray_origin[0]),
                Math.floor(ray_origin[1]),
                Math.floor(ray_origin[2]) ];
-  const deltaDist = [0, 0, 0];
+  const delta_dist = [0, 0, 0];
   const step = [0, 0, 0];
   for (let i = 0; i < 3; i++) {
     const x = (ray_direction[0] / ray_direction[i]);
     const y = (ray_direction[1] / ray_direction[i]);
     const z = (ray_direction[2] / ray_direction[i]);
-    deltaDist[i] = Math.sqrt(x*x + y*y + z*z);
+    delta_dist[i] = Math.sqrt(x*x + y*y + z*z);
     if (ray_direction[i] < 0) {
       step[i] = -1;
-      ret.impact[i] = (ray_origin[i] - map[i]) * deltaDist[i];
+      ret.impact[i] = (ray_origin[i] - map[i]) * delta_dist[i];
     } else {
       step[i] = 1;
-      ret.impact[i] = (map[i] + 1 - ray_origin[i]) * deltaDist[i];
+      ret.impact[i] = (map[i] + 1 - ray_origin[i]) * delta_dist[i];
     }
   }
 
@@ -774,24 +783,21 @@ function ray_to_map(ray_origin, ray_direction) {
         ret.side = i;
     ret.dir = step[ret.side];
 
-    ret.impact[ret.side] += deltaDist[ret.side];
+    ret.impact[ret.side] += delta_dist[ret.side];
     map[ret.side] += step[ret.side];
     if (map[ret.side] <  0       ||
         map[ret.side] >= MAP_SIZE)
       break; // out of bounds
 
     // sample volume data at calculated position and make collision calculations
-    ret.last_index = ret.index;
-    ret.index = map[0]*MAP_SIZE*MAP_SIZE + map[1]*MAP_SIZE + map[2];
-
     ret.last_coord = ret.coord;
     ret.coord = [map[0], map[1], map[2]];
 
     // closest voxel is found, no more work to be done
-    if (state.map[ret.index]) return ret;
+    if (map_get(map[0], map[1], map[2])) return ret;
   }
 
-  ret.index = ret.coord = undefined;
+  ret.coord = undefined;
   return ret;
 }
 
@@ -822,18 +828,18 @@ window.onmousedown = e => {
 
   const i = state.inv;
   if (e.button == 2 && state.screen == SCREEN_WORLD) {
-    const src_index = map_index(p[0], p[1], p[2]);
+    const block = map_get(p[0], p[1], p[2]);
 
-    if (state.map[src_index] == ID_BLOCK_TABLE) {
+    if (block == ID_BLOCK_TABLE) {
       state.screen = SCREEN_TABLE;
-      state.screen_block_index = src_index;
+      state.screen_block_coord = p;
       document.exitPointerLock();
       return;
     }
-    if (state.map[src_index] == ID_BLOCK_FURNACE0 ||
-        state.map[src_index] == ID_BLOCK_FURNACE1) {
+    if (block == ID_BLOCK_FURNACE0 ||
+        block == ID_BLOCK_FURNACE1) {
       state.screen = SCREEN_FURNACE;
-      state.screen_block_index = src_index;
+      state.screen_block_coord = p;
       document.exitPointerLock();
       return;
     }
@@ -855,8 +861,7 @@ window.onmousedown = e => {
       if (held.id <= ID_BLOCK_LAST) {
         /* place block */
         p[cast.side] -= cast.dir;
-        const dst_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
-        state.map[dst_index] = held.id;
+        map_set(p[0], p[1], p[2], held.id);
 
         let axised = 0;
         let mirrored = 0;
@@ -882,20 +887,20 @@ window.onmousedown = e => {
             axis[1] = Math.abs(axis[1]),
             axis[2] = Math.abs(axis[2]);
 
-          state.map_data[dst_index] = { axis };
+          map_data(p[0], p[1], p[2]).axis = axis;
         }
 
         consume();
       } else {
         if (held.id == ID_ITEM_BONEMEAL) {
           /* grow shit */
-          const src_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
-          const under_index = p[0]*MAP_SIZE*MAP_SIZE + (p[1] - 1)*MAP_SIZE + p[2];
-          const on_sap = state.map[src_index] == ID_BLOCK_SAPLING;
-          const on_dirt = state.map[src_index] == ID_BLOCK_DIRT  ||
-                          state.map[src_index] == ID_BLOCK_GRASS  ;
-          const over_dirt = state.map[under_index] == ID_BLOCK_DIRT  ||
-                            state.map[under_index] == ID_BLOCK_GRASS  ;
+          const src_block = map_get(p[0], p[1], p[2]);
+          const under_block = map_get(p[0], p[1] - 1, p[2]);
+          const on_sap = src_block == ID_BLOCK_SAPLING;
+          const on_dirt = src_block == ID_BLOCK_DIRT  ||
+                          src_block == ID_BLOCK_GRASS  ;
+          const over_dirt = under_block == ID_BLOCK_DIRT  ||
+                            under_block == ID_BLOCK_GRASS  ;
           if (on_sap && over_dirt) {
             place_tree(...cast.coord);
             consume();
@@ -907,13 +912,20 @@ window.onmousedown = e => {
             const min_z = p[2] - 1, max_z = p[2] + 1;
             for (let ox = 0; ox <= (max_x-min_x); ox++)  {
               for (let oz = 0; oz <= (max_z-min_z); oz++) {
-                const top_i = map_index(min_x + ox, p[1]+1, min_z + oz);
+                const top_x = min_x + ox;
+                const top_y = p[1] + 1;
+                const top_z = min_z + oz;
 
-                if (state.map[top_i] != ID_BLOCK_NONE) continue;
-                if (Math.random() < (3/(3*3)))
-                  state.map[top_i] = (Math.random() < 0.5) ? ID_BLOCK_FLOWER0 : ID_BLOCK_FLOWER1;
-                if (Math.random() < (5/(3*3)))
-                  state.map[top_i] = ID_BLOCK_FLOWER2;
+                if (map_get(top_x, top_y, top_z) != ID_BLOCK_NONE) continue;
+
+                let on_top;
+                {
+                  if (Math.random() < (3/(3*3)))
+                    on_top = (Math.random() < 0.5) ? ID_BLOCK_FLOWER0 : ID_BLOCK_FLOWER1;
+                  if (Math.random() < (5/(3*3)))
+                    on_top = ID_BLOCK_FLOWER2;
+                }
+                if (on_top) map_set(top_x, top_y, top_z, on_top);
               }
             }
 
@@ -1304,7 +1316,6 @@ async function ss_sprite(gl) {
     const tex_o = SS_COLUMNS*11 + 24;
     const u =           (tex_o % SS_COLUMNS) / SS_COLUMNS * SPRITESHEET_SIZE;
     const v = Math.floor(tex_o / SS_COLUMNS) / SS_COLUMNS * SPRITESHEET_SIZE;
-    console.log({ u, v });
     ss_ctx.globalAlpha = 0.2;
     ss_ctx.fillStyle = "white";
     ss_ctx.fillRect(u, v, 16, 16);
@@ -1323,36 +1334,34 @@ function tick() {
     for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
       for (let t_y = 0; t_y < MAP_SIZE; t_y++) 
         for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
-          const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
-          let block_id = state.map[index];
+          let block_id = map_get(t_x, t_y, t_z);
 
           if (block_id == ID_BLOCK_LEAVES) {
             let decay = 1;
             for (let o_x = -2; o_x <= 2; o_x++) 
               for (let o_y = -2; o_y <= 2; o_y++) 
                 for (let o_z = -2; o_z <= 2; o_z++) {
-                  const nbr_index = map_index(o_x + t_x, o_y + t_y, o_z + t_z);
-                  if (state.map[nbr_index] == ID_BLOCK_LOG) decay = 0;
+                  const nbr = map_get(o_x + t_x, o_y + t_y, o_z + t_z);
+                  if (nbr == ID_BLOCK_LOG) decay = 0;
                 }
 
-            if (decay && (Math.random() < 0.1)) pending.push(index);
+            if (decay && (Math.random() < 0.1))
+              pending.push([t_x, t_y, t_z]);
           }
 
           if (
             block_id == ID_BLOCK_FURNACE0 ||
             block_id == ID_BLOCK_FURNACE1
           ) {
-            state.map_data[index] ??= {};
-
-            const md = state.map_data[index];
-            md.inv           ??= [...Array(3)].fill(0);
+            const md = map_data(t_x, t_y, t_z);
+            md.inv             ??= [...Array(3)].fill(0);
             md.tick_burn_end   ??= state.tick-1;
             md.tick_cook_end   ??= state.tick-1;
             md.tick_burn_start ??= state.tick-1;
             md.tick_cook_start ??= state.tick-1;
-            md.id_cook_out   ??= undefined;
+            md.id_cook_out     ??= undefined;
 
-            const furnace_inv = state.map_data[index].inv;
+            const furnace_inv = md.inv;
             let cooking = state.tick < md.tick_cook_end;
             let burning = state.tick < md.tick_burn_end;
 
@@ -1373,7 +1382,7 @@ function tick() {
                 furnace_inv[FURNACE_INDEX_OUT].amount++;
             }
 
-            state.map[index] = burning ? ID_BLOCK_FURNACE1 : ID_BLOCK_FURNACE0;
+            map_set(t_x, t_y, t_z, burning ? ID_BLOCK_FURNACE1 : ID_BLOCK_FURNACE0);
 
             const out_slot_ready = (
               furnace_inv[FURNACE_INDEX_OUT] == 0 ||
@@ -1410,8 +1419,8 @@ function tick() {
           }
 
         }
-    for (const index of pending)
-      state.map[index] = ID_BLOCK_NONE;
+    for (const [x, y, z] of pending)
+      map_set(x, y, z, ID_BLOCK_NONE);
   }
 
   for (const i of state.items) {
@@ -1509,10 +1518,10 @@ function tick() {
         const block = [Math.floor(state.pos[0]),
                        Math.floor(state.pos[1] + 0.01*i),
                        Math.floor(state.pos[2])];
-        const last_index = map_index(block[0], block[1], block[2]);
-        const md = state.map_data[last_index];
+        const last_block = map_get(block[0], block[1], block[2]);
+        const md = map_data(block[0], block[1], block[2]);
 
-        if (md && md.axis && state.map[last_index] == ID_BLOCK_STAIRS) {
+        if (md && md.axis && last_block == ID_BLOCK_STAIRS) {
           const delta_i = (md.axis[0] != 0) ? 0 : 2;
           const push = Math.sign(md.axis[delta_i]) * delta[delta_i];
 
@@ -1854,7 +1863,9 @@ function tick() {
       function place_block(t_x, t_y, t_z, block_id, opts={}) {
         const topped = (_top, rest, btm=_top) => [rest, _top, rest, rest, btm, rest];
 
-        if ((opts.block_data != undefined) && (block_id == ID_BLOCK_LOG || block_id == ID_BLOCK_STAIRS)) {
+        if ((opts.block_data      != undefined) &&
+            (opts.block_data.axis != undefined) &&
+            (block_id == ID_BLOCK_LOG || block_id == ID_BLOCK_STAIRS)) {
           let x, y, z;
 
           if (block_id == ID_BLOCK_LOG) {
@@ -1916,22 +1927,24 @@ function tick() {
         if (state.mining.ts_end < Date.now()) {
           do {
             const p = state.mining.block_coord;
-            const index = map_index(p[0], p[1], p[2]);
 
             const held_id = state.inv.items[state.inv.held_i].id;
 
-            let id = state.map[index];
-            if (id == ID_BLOCK_FLOWER2) id = ID_BLOCK_NONE;
-            if (id == ID_BLOCK_LEAVES ) id = ID_BLOCK_NONE;
-            if (id == ID_BLOCK_GRASS  ) id = ID_BLOCK_DIRT;
-            if (id == ID_BLOCK_STONE  ) id = ID_BLOCK_COBBLE;
-            if (id == ID_BLOCK_ORE_T2   && held_id != ID_ITEM_T0_PICK) id = ID_BLOCK_NONE;
+            const mined = map_get(p[0], p[1], p[2]);
+            let out = mined;
+            if (mined == ID_BLOCK_FLOWER2) out = ID_BLOCK_NONE;
+            if (mined == ID_BLOCK_LEAVES ) out = ID_BLOCK_NONE;
+            if (mined == ID_BLOCK_GRASS  ) out = ID_BLOCK_DIRT;
+            if (mined == ID_BLOCK_STONE  ) out = ID_BLOCK_COBBLE;
+            if (mined == ID_BLOCK_ORE_T2 && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
+            if (mined == ID_BLOCK_STONE  && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
+            if (mined == ID_BLOCK_COBBLE && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
 
             const vel = [Math.cos(Date.now() * 0.017)*0.05,
                          0,
                          Math.sin(Date.now() * 0.017)*0.05];
-            if (id) state.items.push({ vel, pos: add3(p, [0.5, 0.2, 0.5]), id, amount: 1 });
-            state.map[index] = 0;
+            if (out) state.items.push({ vel, pos: add3(p, [0.5, 0.2, 0.5]), id: out, amount: 1 });
+            map_set(p[0], p[1], p[2], ID_BLOCK_NONE);
           } while(false);
         }
       } else {
@@ -1950,8 +1963,7 @@ function tick() {
           const held_id = state.inv.items[state.inv.held_i].id;
 
           const p = [...state.mining.block_coord];
-          const index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
-          const block_id = state.map[index];
+          const block_id = map_get(p[0], p[1], p[2]);
 
           let mine_time = 2500;
           if (block_id == ID_BLOCK_LEAVES ) mine_time = 950;
@@ -1966,6 +1978,8 @@ function tick() {
           if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_STONE    ) mine_time =  950;
           if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_ORE_T2   ) mine_time =  950;
           if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_COBBLE   ) mine_time = 1000;
+          if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_FURNACE0 ) mine_time = 2000;
+          if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_FURNACE1 ) mine_time = 2000;
           if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_DIRT     ) mine_time =  750;
           if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_GRASS    ) mine_time =  800;
           if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LOG      ) mine_time =  850;
@@ -2023,23 +2037,19 @@ function tick() {
         /* render voxel map */
         if (render_stage == 0 || render_stage == 2) {
           /* removing block being mined before rendering map */
-          let mining_index = undefined;
           let mining_block_type = undefined;
           if (state.mining.block_coord) {
             const p = state.mining.block_coord;
-            mining_index = p[0]*MAP_SIZE*MAP_SIZE + p[1]*MAP_SIZE + p[2];
-
-            mining_block_type = state.map[mining_index];
-            state.map[mining_index] = 0;
+            mining_block_type = map_get(p[0], p[1], p[2]);
+            map_set(p[0], p[1], p[2], ID_BLOCK_NONE);
           }
 
           for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
             for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) 
               for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
                 const opts = {};
-                const index = map_index(t_x, t_y, t_z);
-                let block_id    = state.map     [index];
-                opts.block_data = state.map_data[index];
+                let block_id    = map_get (t_x, t_y, t_z);
+                opts.block_data = map_data(t_x, t_y, t_z);
                 if (render_stage == 0           &&
                     block_id != ID_BLOCK_NONE   &&  
                     block_id != ID_BLOCK_LEAVES )
@@ -2051,7 +2061,7 @@ function tick() {
 
           if (render_stage == 2) {
             /* render block being mined with animation */
-            if (mining_index && mining_block_type) {
+            if (mining_block_type) {
               let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
               t = Math.min(1, t);
               t = ease_out_sine(t);
@@ -2059,9 +2069,8 @@ function tick() {
               const t_y = state.mining.block_coord[1];
               const t_z = state.mining.block_coord[2];
               if (t < 0.98) {
-                const index = map_index(t_x, t_y, t_z);
                 const opts = {};
-                opts.block_data = state.map_data[index];
+                opts.block_data = map_data(t_x, t_y, t_z);
                 place_block(t_x, t_y, t_z, mining_block_type, opts);
               }
               const stage = Math.floor(lerp(0, 9, t));
@@ -2070,16 +2079,23 @@ function tick() {
           }
 
           /* undo "removing block being mined before rendering map" */
-          if (mining_index)
-            state.map[mining_index] = mining_block_type;
+          if (state.mining.block_coord)
+            map_set(state.mining.block_coord[0],
+                    state.mining.block_coord[1],
+                    state.mining.block_coord[2],
+                    mining_block_type);
         }
 
         /* render indicator of what block you are looking at */
-        if (render_stage == 2                        &&
-            state.screen == SCREEN_WORLD             &&
-            cast.index != undefined                  &&
-            cast.index <  MAP_SIZE*MAP_SIZE*MAP_SIZE &&
-            cast.index >= 0                          &&
+        if (render_stage == 2             &&
+            state.screen == SCREEN_WORLD  &&
+            cast.coord != undefined       &&
+            cast.coord[0] <  MAP_SIZE     &&
+            cast.coord[1] <  MAP_SIZE     &&
+            cast.coord[2] <  MAP_SIZE     &&
+            cast.coord[0] >= 0            &&
+            cast.coord[1] >= 0            &&
+            cast.coord[2] >= 0            &&
             !state.mousedown
         ) {
           const p = [...cast.coord];
@@ -2569,12 +2585,10 @@ function tick() {
             itms[out_i] = 0;
           }
 
-          if (
-            state.screen == SCREEN_FURNACE               &&
-            state.map_data[state.screen_block_index]     &&
-            state.map_data[state.screen_block_index].inv
-          ) {
-            const md = state.map_data[state.screen_block_index];
+          const md = map_data(state.screen_block_coord[0],
+                              state.screen_block_coord[1],
+                              state.screen_block_coord[2]);
+          if (state.screen == SCREEN_FURNACE && md && md.inv) {
             const furnace_inv = md.inv;
 
             const itms = state.inv.items;
