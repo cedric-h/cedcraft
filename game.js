@@ -3,11 +3,11 @@
 
 /* ENGINE
  *  [x] Camera
- *  [ ] Skybox
+ *  [x] Skybox
  *  [ ] Ambient Occlusion
  *
- *  [ ] 2D Physics
- *  [ ] Jump
+ *  [x] 2D Physics
+ *  [x] Jump
  *
  *  [ ] Splitscreen
  *  [ ] State Cache
@@ -18,19 +18,19 @@
  * SANDBOX
  *  [x] Break
  *  [x] Place
- *  [ ] Pick Up
+ *  [x] Pick Up
  *
- *  [ ] Hotbar
- *  [ ] Numerals
+ *  [x] Hotbar
+ *  [x] Numerals
  *
- *  [ ] Tree
- *  [ ] Sapling
+ *  [x] Tree
+ *  [x] Sapling
  *
- *  [ ] Inventory
- *  [ ] Crafting Table
- *  [ ] Furnace
+ *  [x] Inventory
+ *  [x] Crafting Table
+ *  [x] Furnace
  *
- *  [ ] Item break speeds
+ *  [x] Item break speeds
  *  [ ] Chest
  *
  * DAY DREAM
@@ -479,10 +479,12 @@ let _id = 0;
 const ID_BLOCK_NONE     = _id++;
 const ID_BLOCK_DIRT     = _id++;
 const ID_BLOCK_STONE    = _id++;
+const ID_BLOCK_ORE_T2   = _id++;
 const ID_BLOCK_COBBLE   = _id++;
 const ID_BLOCK_WOOD     = _id++;
 const ID_BLOCK_TABLE    = _id++;
-const ID_BLOCK_FURNACE  = _id++;
+const ID_BLOCK_FURNACE0 = _id++;
+const ID_BLOCK_FURNACE1 = _id++;
 const ID_BLOCK_STAIRS   = _id++;
 const ID_BLOCK_GRASS    = _id++;
 const ID_BLOCK_GLASS    = _id++;
@@ -496,7 +498,8 @@ const ID_BLOCK_BREAKING = _id; _id += 10;
 const ID_BLOCK_LAST = _id-1;
 
 const ID_ITEM_BONEMEAL  = _id++;
-const ID_ITEM_T0_SPADE = _id++;
+const ID_ITEM_T2_INGOT  = _id++;
+const ID_ITEM_T0_SPADE  = _id++;
 const ID_ITEM_T0_PICK   = _id++;
 const ID_ITEM_T0_AXE    = _id++;
 
@@ -511,6 +514,7 @@ function id_to_tex_num(block_id) {
 
   let tex_offset = 0;
   if (block_id == ID_ITEM_BONEMEAL  ) tex_offset = SS_COLUMNS*11 + 31;
+  if (block_id == ID_ITEM_T2_INGOT  ) tex_offset = SS_COLUMNS* 1 +  7 + 16;
   if (block_id == ID_ITEM_T0_SPADE  ) tex_offset = SS_COLUMNS*5 + 16;
   if (block_id == ID_ITEM_T0_PICK   ) tex_offset = SS_COLUMNS*6 + 16;
   if (block_id == ID_ITEM_T0_AXE    ) tex_offset = SS_COLUMNS*7 + 16;
@@ -518,13 +522,17 @@ function id_to_tex_num(block_id) {
   if (block_id == ID_BLOCK_TABLE    ) tex_offset = xyz(SS_COLUMNS*3 + 11,
                                                        SS_COLUMNS*2 + 11,
                                                        SS_COLUMNS*3 + 12);
-  if (block_id == ID_BLOCK_FURNACE  ) tex_offset = xyz(SS_COLUMNS*2 + 12,
+  if (block_id == ID_BLOCK_FURNACE0 ) tex_offset = xyz(SS_COLUMNS*2 + 12,
+                                                       SS_COLUMNS*3 + 14,
+                                                       SS_COLUMNS*2 + 13);
+  if (block_id == ID_BLOCK_FURNACE1 ) tex_offset = xyz(SS_COLUMNS*3 + 13,
                                                        SS_COLUMNS*3 + 14,
                                                        SS_COLUMNS*2 + 13);
   if (block_id == ID_BLOCK_STAIRS   ) tex_offset = 4;
   if (block_id == ID_BLOCK_GRASS    ) tex_offset = topped(0, 2, 2);
   if (block_id == ID_BLOCK_DIRT     ) tex_offset = 2;
   if (block_id == ID_BLOCK_STONE    ) tex_offset = 1;
+  if (block_id == ID_BLOCK_ORE_T2   ) tex_offset = SS_COLUMNS*2 + 1;
   if (block_id == ID_BLOCK_COBBLE   ) tex_offset = SS_COLUMNS;
   if (block_id == ID_BLOCK_GLASS    ) tex_offset = 3*SS_COLUMNS + 1;
   if (block_id == ID_BLOCK_FLOWER0  ) tex_offset = 12;
@@ -542,14 +550,21 @@ function id_to_tex_num(block_id) {
 const SCREEN_WORLD      = 0;
 const SCREEN_INV        = 1;
 const SCREEN_TABLE      = 2;
+const SCREEN_FURNACE    = 3;
 
 /* where crafting table, etc. store items */
 const SLOTS_INV = 9*4;
 const SLOTS_SCRATCH = 9 + 1 + 1;
 
+const FURNACE_INDEX_FUEL  = 0;
+const FURNACE_INDEX_COOK  = 1;
+const FURNACE_INDEX_OUT   = 2;
+const FURNACE_INDEX_COUNT = 3;
+
 let state = {
   tick: 0,
   screen: SCREEN_WORLD,
+  screen_block_index: 0,
 
   inv: {
     items: [...Array(SLOTS_INV + SLOTS_SCRATCH)].fill(0),
@@ -558,6 +573,7 @@ let state = {
 
   map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
   map_data: {}, /* same indices as map, has extra data tailored to map id */
+
   items: [
     { pos: [2.5, 1.2, 3.5], id: ID_BLOCK_WOOD , amount: 1 },
     { pos: [4.5, 1.2, 3.5], id: ID_BLOCK_GRASS, amount: 1 },
@@ -597,7 +613,7 @@ function state_drop(i, amt) {
   const itms = state.inv.items;
   if (itms[i] != 0) {
     const id = itms[i].id;
-    const vel = mul3_f(cam_looking(), 0.05);
+    const vel = mul3_f(cam_looking(), 0.12);
     const dir = norm(add3(cam_looking(), [Math.random()*0.1, 1, Math.random()*0.1]));
     const pos = add3(state.pos, mul3_f(dir, 1.5));
     const amount = Math.min(itms[i].amount, amt ?? itms[i].amount);
@@ -625,12 +641,14 @@ for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++)
   for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) {
     const t_z = 0;
     state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_STONE;
+
+    if (Math.random() < 0.04) state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_ORE_T2  ;
   }
 {
   let t_x = 3;
   let t_y = 1;
   let t_z = 1;
-  state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_TABLE;
+  state.map[map_index(t_x, t_y, t_z)] = ID_BLOCK_FURNACE0;
 }
 function place_tree(t_x, t_y, t_z) {
   const height = 4 + (Math.random() < 0.4) +
@@ -805,8 +823,17 @@ window.onmousedown = e => {
   const i = state.inv;
   if (e.button == 2 && state.screen == SCREEN_WORLD) {
     const src_index = map_index(p[0], p[1], p[2]);
+
     if (state.map[src_index] == ID_BLOCK_TABLE) {
       state.screen = SCREEN_TABLE;
+      state.screen_block_index = src_index;
+      document.exitPointerLock();
+      return;
+    }
+    if (state.map[src_index] == ID_BLOCK_FURNACE0 ||
+        state.map[src_index] == ID_BLOCK_FURNACE1) {
+      state.screen = SCREEN_FURNACE;
+      state.screen_block_index = src_index;
       document.exitPointerLock();
       return;
     }
@@ -1298,6 +1325,7 @@ function tick() {
         for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
           const index = t_x*MAP_SIZE*MAP_SIZE + t_y*MAP_SIZE + t_z;
           let block_id = state.map[index];
+
           if (block_id == ID_BLOCK_LEAVES) {
             let decay = 1;
             for (let o_x = -2; o_x <= 2; o_x++) 
@@ -1309,6 +1337,78 @@ function tick() {
 
             if (decay && (Math.random() < 0.1)) pending.push(index);
           }
+
+          if (
+            block_id == ID_BLOCK_FURNACE0 ||
+            block_id == ID_BLOCK_FURNACE1
+          ) {
+            state.map_data[index] ??= {};
+
+            const md = state.map_data[index];
+            md.inv           ??= [...Array(3)].fill(0);
+            md.tick_burn_end   ??= state.tick-1;
+            md.tick_cook_end   ??= state.tick-1;
+            md.tick_burn_start ??= state.tick-1;
+            md.tick_cook_start ??= state.tick-1;
+            md.id_cook_out   ??= undefined;
+
+            const furnace_inv = state.map_data[index].inv;
+            let cooking = state.tick < md.tick_cook_end;
+            let burning = state.tick < md.tick_burn_end;
+
+            let would_cook_out = undefined;
+            if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_COBBLE) would_cook_out = ID_BLOCK_STONE;
+            if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_ORE_T2) would_cook_out = ID_ITEM_T2_INGOT;
+
+            let would_burn_for = undefined;
+            if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_LOG    ) would_burn_for = 1.0*SEC_IN_TICKS;
+            if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_WOOD   ) would_burn_for = 0.5*SEC_IN_TICKS;
+            if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_SAPLING) would_burn_for = 0.1*SEC_IN_TICKS;
+            would_burn_for = Math.floor(would_burn_for);
+
+            if (state.tick == md.tick_cook_end) {
+              if (furnace_inv[FURNACE_INDEX_OUT] == 0)
+                furnace_inv[FURNACE_INDEX_OUT] = { amount: 1, id: md.id_cook_out };
+              else
+                furnace_inv[FURNACE_INDEX_OUT].amount++;
+            }
+
+            state.map[index] = burning ? ID_BLOCK_FURNACE1 : ID_BLOCK_FURNACE0;
+
+            const out_slot_ready = (
+              furnace_inv[FURNACE_INDEX_OUT] == 0 ||
+              would_cook_out == md.id_cook_out
+            );
+
+            if (
+              !burning       &&
+              would_cook_out &&
+              would_burn_for &&
+              out_slot_ready
+            ) {
+              burning = 1;
+
+              furnace_inv[FURNACE_INDEX_FUEL].amount--;
+              if (furnace_inv[FURNACE_INDEX_FUEL].amount == 0)
+                furnace_inv[FURNACE_INDEX_FUEL] = 0;
+
+              md.tick_burn_start = state.tick;
+              md.tick_burn_end   = state.tick + would_burn_for;
+            }
+
+            if (burning && !cooking && out_slot_ready && would_cook_out) {
+              cooking = 1;
+
+              furnace_inv[FURNACE_INDEX_COOK].amount--;
+              if (furnace_inv[FURNACE_INDEX_COOK].amount == 0)
+                furnace_inv[FURNACE_INDEX_COOK] = 0;
+
+              md.id_cook_out = would_cook_out;
+              md.tick_cook_start = state.tick;
+              md.tick_cook_end   = state.tick + SEC_IN_TICKS;
+            }
+          }
+
         }
     for (const index of pending)
       state.map[index] = ID_BLOCK_NONE;
@@ -1317,11 +1417,13 @@ function tick() {
   for (const i of state.items) {
     i.vel ??= [0, 0, 0];
 
-    i.vel[1] -= 0.09/SEC_IN_TICKS;
+    i.vel[1] -= 0.35/SEC_IN_TICKS;
     i.pos = add3(i.pos, i.vel);
-    if (pin_to_empty(i)) {
+
+    let hit = pin_to_empty(i);
+    if (hit) {
       i.vel[0] *= 0.9;
-      i.vel[1]  = 0;
+      if (hit[1]) i.vel[1]  = 0;
       i.vel[2] *= 0.9;
     }
   }
@@ -1335,7 +1437,7 @@ function tick() {
       const dist = mag3(sub3([state.pos[0], 0, state.pos[2]],
                              [    z.pos[0], 0,     z.pos[2]]));
 
-      /* fuzz target slightly to distribute minions on ring around player */
+      /* fuzz target slightly to distribute enemies in ring around player */
       let ring_size = dist * 0.3;
       if (ring_size < 2.0) ring_size = 2.0;
 
@@ -1533,7 +1635,7 @@ function tick() {
     }
 
     /* spritesheet shower helper thingy */
-    if (1) {
+    if (0) {
       canvas.hidden = true;
       document.body.appendChild(spritesheet);
       spritesheet.style.position = 'absolute';
@@ -1816,13 +1918,14 @@ function tick() {
             const p = state.mining.block_coord;
             const index = map_index(p[0], p[1], p[2]);
 
+            const held_id = state.inv.items[state.inv.held_i].id;
+
             let id = state.map[index];
-            if (id == ID_BLOCK_FLOWER0) id = ID_BLOCK_NONE;
-            if (id == ID_BLOCK_FLOWER1) id = ID_BLOCK_NONE;
             if (id == ID_BLOCK_FLOWER2) id = ID_BLOCK_NONE;
             if (id == ID_BLOCK_LEAVES ) id = ID_BLOCK_NONE;
             if (id == ID_BLOCK_GRASS  ) id = ID_BLOCK_DIRT;
             if (id == ID_BLOCK_STONE  ) id = ID_BLOCK_COBBLE;
+            if (id == ID_BLOCK_ORE_T2   && held_id != ID_ITEM_T0_PICK) id = ID_BLOCK_NONE;
 
             const vel = [Math.cos(Date.now() * 0.017)*0.05,
                          0,
@@ -1856,15 +1959,20 @@ function tick() {
           if (block_id == ID_BLOCK_FLOWER1) mine_time = 350;
           if (block_id == ID_BLOCK_FLOWER2) mine_time = 350;
           if (block_id == ID_BLOCK_SAPLING) mine_time = 350;
-          if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_STONE ) mine_time =  950;
-          if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_COBBLE) mine_time = 1000;
-          if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_DIRT  ) mine_time =  750;
-          if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_GRASS ) mine_time =  800;
-          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LOG   ) mine_time =  850;
-          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LEAVES) mine_time =  750;
-          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_WOOD  ) mine_time =  650;
-          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_TABLE ) mine_time =  650;
-          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_STAIRS) mine_time =  650;
+          if (block_id == ID_BLOCK_STONE)    mine_time = 9000;
+          if (block_id == ID_BLOCK_ORE_T2  ) mine_time = 10000;
+          if (block_id == ID_BLOCK_FURNACE0) mine_time = 10000;
+          if (block_id == ID_BLOCK_FURNACE1) mine_time = 10000;
+          if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_STONE    ) mine_time =  950;
+          if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_ORE_T2   ) mine_time =  950;
+          if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_COBBLE   ) mine_time = 1000;
+          if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_DIRT     ) mine_time =  750;
+          if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_GRASS    ) mine_time =  800;
+          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LOG      ) mine_time =  850;
+          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LEAVES   ) mine_time =  750;
+          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_WOOD     ) mine_time =  650;
+          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_TABLE    ) mine_time =  650;
+          if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_STAIRS   ) mine_time =  650;
 
           state.mining.ts_end = Date.now() + mine_time;
         }
@@ -1990,7 +2098,7 @@ function tick() {
         if (render_stage == 2) {
           for (const { pos, id } of state.items) {
             const mat = mat4_from_y_rotation(mat4_create(), Date.now()/1000);
-            mat4_mul(mat, mat, mat4_from_translation(mat4_create(), [0.0, 0.5, 0.0]));
+            mat4_mul(mat, mat, mat4_from_translation(mat4_create(), [0.0, 0.15, 0.0]));
             mat4_mul(mat, mat, mat4_from_scaling(mat4_create(), [0.3, 0.3, 0.3]));
             place_block(...pos, id, { mat });
           }
@@ -2190,7 +2298,9 @@ function tick() {
           }
         }
 
-        const inv_screen = state.screen == SCREEN_INV || state.screen == SCREEN_TABLE;
+        const inv_screen = state.screen == SCREEN_INV     ||
+                           state.screen == SCREEN_TABLE   ||
+                           state.screen == SCREEN_FURNACE ;
         if (render_stage == 2 && inv_screen) {
           const z = -0.9997;
 
@@ -2199,11 +2309,12 @@ function tick() {
           const size_y = 166;
           const btm_pad = pixel_round((ui_h - size_y)/2);
 
-          /* render inv bg */
+          /* render inv bg tex */
           {
             let tex_o;
-            if (state.screen == SCREEN_INV  ) tex_o = 0*SS_COLUMNS + 16*2;
-            if (state.screen == SCREEN_TABLE) tex_o = 0*SS_COLUMNS + 16*3;
+            if (state.screen == SCREEN_INV    ) tex_o = 0*SS_COLUMNS + 16*2;
+            if (state.screen == SCREEN_TABLE  ) tex_o = 0*SS_COLUMNS + 16*3;
+            if (state.screen == SCREEN_FURNACE) tex_o = 0*SS_COLUMNS + 16*4;
 
             const opts = { tex_size_x: size_x/16,
                            tex_size_y: size_y/16,
@@ -2367,8 +2478,8 @@ function tick() {
           let tbl_end_i = scratch_i;
           const tbl_slot_count = tbl_end_i - tbl_i;
 
-           /* crafting output */
-           {
+          /* crafting output */
+          if (tbl_extent) {
             const out_i = scratch_i++;
 
             const itms = state.inv.items;
@@ -2456,6 +2567,54 @@ function tick() {
               }
 
             itms[out_i] = 0;
+          }
+
+          if (
+            state.screen == SCREEN_FURNACE               &&
+            state.map_data[state.screen_block_index]     &&
+            state.map_data[state.screen_block_index].inv
+          ) {
+            const md = state.map_data[state.screen_block_index];
+            const furnace_inv = md.inv;
+
+            const itms = state.inv.items;
+
+            /* copy the furnace_inv stored in map_data into the player inv
+             * address space for the UI code, then copy it out for persistence */
+            const host_inv_i = scratch_i;
+            for (let i = 0; i < FURNACE_INDEX_COUNT; i++)
+              itms[scratch_i++] = furnace_inv[i];
+
+            {
+              slot( 58, 107, host_inv_i + FURNACE_INDEX_FUEL);
+              slot( 58, 142, host_inv_i + FURNACE_INDEX_COOK);
+              slot(116, 125, host_inv_i + FURNACE_INDEX_OUT );
+              let burn_t = inv_lerp(md.tick_burn_start, md.tick_burn_end, state.tick);
+              let cook_t = inv_lerp(md.tick_cook_start, md.tick_cook_end, state.tick);
+              burn_t = Math.max(0, Math.min(1, burn_t)); if (state.tick > md.tick_burn_end) burn_t = 0;
+              cook_t = Math.max(0, Math.min(1, cook_t)); if (state.tick > md.tick_cook_end) cook_t = 0;
+
+              const flame = 0*SS_COLUMNS + 16*4 + size_x/16;
+              const arrow = 1*SS_COLUMNS + 16*4 + size_x/16;
+
+              {
+                const opts = { z, tex_size_x: 2*cook_t, tex_size_y: 1 }
+                place_ui_quad(view_proj, 79, 124, 32*cook_t, 16, arrow, opts);
+              }
+
+              {
+                const below = SS_COLUMNS + flame;
+                const size_x = 15;
+                const opts = { z, tex_size_x: size_x/16, tex_size_y: -burn_t };
+                place_ui_quad(view_proj, 59, 124 + 16*burn_t, size_x, 16*-burn_t, below, opts);
+              }
+            }
+
+            /* update the map_data furnace inv, clear out the items out of the player's inv */
+            for (let i = 0; i < FURNACE_INDEX_COUNT; i++)
+              furnace_inv[i] = itms[host_inv_i + i];
+            for (let i = 0; i < FURNACE_INDEX_COUNT; i++)
+              itms[host_inv_i + i] = 0;
           }
 
           if (state.inv.items[pickup_i])
