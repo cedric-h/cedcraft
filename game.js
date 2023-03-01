@@ -570,8 +570,7 @@ let state = {
     held_i: 0,
   },
 
-  map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
-  map_data: {}, /* same indices as map, has extra data tailored to map id */
+  chunks: {},
 
   items: [
     { pos: [2.5, 1.2, 3.5], id: ID_BLOCK_WOOD , amount: 1 },
@@ -602,10 +601,32 @@ let state = {
   using:   { ts_start: Date.now(), ts_end: Date.now() },
   jumping: { tick_start:        0, tick_end:        0, tick_grounded: 0 },
 };
-const map_index = (x, y, z) => x*MAP_SIZE*MAP_SIZE + y*MAP_SIZE + z;
-const map_get  = (x, y, z   ) => state.map     [map_index(x, y, z)];
-const map_set  = (x, y, z, v) => state.map     [map_index(x, y, z)] = v;
-const map_data = (x, y, z   ) => state.map_data[map_index(x, y, z)] ??= {};
+const modulo = (n, d) => ((n % d) + d) % d;
+const map_index = (x, y, z) => modulo(x, MAP_SIZE)*MAP_SIZE*MAP_SIZE +
+                               modulo(y, MAP_SIZE)*MAP_SIZE +
+                               modulo(z, MAP_SIZE);
+const map_has_chunk = (x, y, z) => {
+  const c_x = Math.floor(x / MAP_SIZE);
+  const c_z = Math.floor(z / MAP_SIZE);
+  const chunk_key = c_x + ',' + c_z;
+  return state.chunks[chunk_key] != undefined;
+}
+const map_chunk = (x, y, z) => {
+  const c_x = Math.floor(x / MAP_SIZE);
+  const c_z = Math.floor(z / MAP_SIZE);
+  const chunk_key = c_x + ',' + c_z;
+  if (state.chunks[chunk_key] == undefined)
+    state.chunks[chunk_key] = {
+      x: c_x*MAP_SIZE,
+      z: c_z*MAP_SIZE,
+      map: new Uint8Array(MAP_SIZE * MAP_SIZE * MAP_SIZE),
+      data: {}, /* same indices as map, has extra data tailored to map id */
+    };
+  return state.chunks[chunk_key];
+}
+const map_get  = (x, y, z   ) => map_chunk(x, y, z).map [map_index(x, y, z)];
+const map_set  = (x, y, z, v) => map_chunk(x, y, z).map [map_index(x, y, z)] = v;
+const map_data = (x, y, z   ) => map_chunk(x, y, z).data[map_index(x, y, z)] ??= {};
 
 state.inv.items[1+0] = { id: ID_ITEM_T0_SPADE, amount: 1 };
 state.inv.items[1+1] = { id: ID_ITEM_T0_PICK, amount: 1 };
@@ -660,9 +681,12 @@ function place_tree(t_x, t_y, t_z) {
         }
       }
 }
-function chunk_gen() {
-  for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
-    for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
+
+function chunk_gen(c_x, c_y, c_z) {
+  const chunk_set = (x, y, z, val) => map_set(c_x + x, c_y + y, c_z + z, val);
+
+  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
+    for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
       const t_y = 0;
 
       let flower;
@@ -672,26 +696,28 @@ function chunk_gen() {
         if (Math.random() < (16/(MAP_SIZE*MAP_SIZE)))
           flower = ID_BLOCK_FLOWER2;
       }
-      if (flower) map_set(t_x, t_y+1, t_z, flower);
+      if (flower) chunk_set(t_x, t_y+1, t_z, flower);
 
-      map_set(t_x, t_y, t_z, ID_BLOCK_GRASS);
+      chunk_set(t_x, t_y, t_z, ID_BLOCK_GRASS);
     }
-  for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
-    for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) {
+  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
+    for (let t_y = 0; t_y < MAP_SIZE; t_y++) {
       const t_z = 0;
-      map_set(t_x, t_y, t_z, ID_BLOCK_STONE);
+      chunk_set(t_x, t_y, t_z, ID_BLOCK_STONE);
 
-      if (Math.random() < 0.04) map_set(t_x, t_y, t_z, ID_BLOCK_ORE_T2);
+      if (Math.random() < 0.04) chunk_set(t_x, t_y, t_z, ID_BLOCK_ORE_T2);
     }
   {
     let t_x = 3;
     let t_y = 1;
     let t_z = 1;
-    map_set(t_x, t_y, t_z, ID_BLOCK_FURNACE0);
+    chunk_set(t_x, t_y, t_z, ID_BLOCK_FURNACE0);
   }
   // place_tree(10, 1, 3);
 }
-chunk_gen();
+chunk_gen(-16, 0,   0);
+chunk_gen(  0, 0,   0);
+chunk_gen(  0, 0, -16);
 
 /* used for player & particle vs. world collision */
 function pin_to_empty(ent) {
@@ -785,9 +811,9 @@ function ray_to_map(ray_origin, ray_direction) {
 
     ret.impact[ret.side] += delta_dist[ret.side];
     map[ret.side] += step[ret.side];
-    if (map[ret.side] <  0       ||
-        map[ret.side] >= MAP_SIZE)
-      break; // out of bounds
+
+    /* out of bounds */
+    if (!map_has_chunk(map[0], map[1], map[2])) break;
 
     // sample volume data at calculated position and make collision calculations
     ret.last_coord = ret.coord;
@@ -1607,9 +1633,9 @@ function tick() {
 
   let geo = {
     gpu_position: gl.createBuffer(),
-    cpu_position: new Float32Array(VERT_FLOATS * 1 << 16),
+    cpu_position: new Float32Array(VERT_FLOATS * 1 << 20),
     gpu_indices: gl.createBuffer(),
-    cpu_indices: new Uint16Array(1 << 16),
+    cpu_indices: new Uint16Array(1 << 20),
     vrts_used: 0,
     idxs_used: 0
   };
@@ -2044,20 +2070,29 @@ function tick() {
             map_set(p[0], p[1], p[2], ID_BLOCK_NONE);
           }
 
-          for (let t_x = 0; t_x < (MAP_SIZE-0); t_x++) 
-            for (let t_y = 0; t_y < (MAP_SIZE-0); t_y++) 
-              for (let t_z = 0; t_z < (MAP_SIZE-0); t_z++) {
-                const opts = {};
-                let block_id    = map_get (t_x, t_y, t_z);
-                opts.block_data = map_data(t_x, t_y, t_z);
-                if (render_stage == 0           &&
-                    block_id != ID_BLOCK_NONE   &&  
-                    block_id != ID_BLOCK_LEAVES )
-                  place_block(t_x, t_y, t_z, block_id, opts);
-                if (render_stage == 2          &&
-                    block_id == ID_BLOCK_LEAVES )
-                  place_block(t_x, t_y, t_z, block_id, opts);
-              }
+          for (const chunk_key in state.chunks) {
+            const chunk = state.chunks[chunk_key];
+
+            for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
+              for (let t_y = 0; t_y < MAP_SIZE; t_y++) 
+                for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
+                  const opts = {};
+                  const index = map_index(t_x, t_y, t_z);
+                  let block_id    = chunk.map [index];
+                  opts.block_data = chunk.data[index];
+
+                  const w_x = t_x + chunk.x;
+                  const w_y = t_y;
+                  const w_z = t_z + chunk.z;
+                  if (render_stage == 0           &&
+                      block_id != ID_BLOCK_NONE   &&  
+                      block_id != ID_BLOCK_LEAVES )
+                    place_block(w_x, w_y, w_z, block_id, opts);
+                  if (render_stage == 2          &&
+                      block_id == ID_BLOCK_LEAVES )
+                    place_block(w_x, w_y, w_z, block_id, opts);
+                }
+          }
 
           if (render_stage == 2) {
             /* render block being mined with animation */
@@ -2090,12 +2125,6 @@ function tick() {
         if (render_stage == 2             &&
             state.screen == SCREEN_WORLD  &&
             cast.coord != undefined       &&
-            cast.coord[0] <  MAP_SIZE     &&
-            cast.coord[1] <  MAP_SIZE     &&
-            cast.coord[2] <  MAP_SIZE     &&
-            cast.coord[0] >= 0            &&
-            cast.coord[1] >= 0            &&
-            cast.coord[2] >= 0            &&
             !state.mousedown
         ) {
           const p = [...cast.coord];
