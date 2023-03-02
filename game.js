@@ -510,6 +510,7 @@ const MAP_SIZE = 16;
 function id_to_tex_num(block_id) {
   const topped       = (_top, rest, btm=_top) => [rest, _top, rest, rest, btm, rest];
   const xyz = (x, y, z) => [x, y, z, x, y, z];
+  const all = tex => [tex, tex, tex, tex, tex, tex];
 
   let tex_offset = 0;
   if (block_id == ID_ITEM_BONEMEAL  ) tex_offset = SS_COLUMNS*11 + 31;
@@ -517,7 +518,7 @@ function id_to_tex_num(block_id) {
   if (block_id == ID_ITEM_T0_SPADE  ) tex_offset = SS_COLUMNS*5 + 16;
   if (block_id == ID_ITEM_T0_PICK   ) tex_offset = SS_COLUMNS*6 + 16;
   if (block_id == ID_ITEM_T0_AXE    ) tex_offset = SS_COLUMNS*7 + 16;
-  if (block_id == ID_BLOCK_WOOD     ) tex_offset = 4;
+  if (block_id == ID_BLOCK_WOOD     ) tex_offset = all(4);
   if (block_id == ID_BLOCK_TABLE    ) tex_offset = xyz(SS_COLUMNS*3 + 11,
                                                        SS_COLUMNS*2 + 11,
                                                        SS_COLUMNS*3 + 12);
@@ -529,19 +530,19 @@ function id_to_tex_num(block_id) {
                                                        SS_COLUMNS*2 + 13);
   if (block_id == ID_BLOCK_STAIRS   ) tex_offset = 4;
   if (block_id == ID_BLOCK_GRASS    ) tex_offset = topped(0, 2, 2);
-  if (block_id == ID_BLOCK_DIRT     ) tex_offset = 2;
-  if (block_id == ID_BLOCK_STONE    ) tex_offset = 1;
-  if (block_id == ID_BLOCK_ORE_T2   ) tex_offset = SS_COLUMNS*2 + 1;
-  if (block_id == ID_BLOCK_COBBLE   ) tex_offset = SS_COLUMNS;
-  if (block_id == ID_BLOCK_GLASS    ) tex_offset = 3*SS_COLUMNS + 1;
-  if (block_id == ID_BLOCK_FLOWER0  ) tex_offset = 12;
-  if (block_id == ID_BLOCK_FLOWER1  ) tex_offset = 13;
-  if (block_id == ID_BLOCK_FLOWER2  ) tex_offset = 2*SS_COLUMNS + 7;
-  if (block_id == ID_BLOCK_SAPLING  ) tex_offset = 15;
+  if (block_id == ID_BLOCK_DIRT     ) tex_offset = all(2);
+  if (block_id == ID_BLOCK_STONE    ) tex_offset = all(1);
+  if (block_id == ID_BLOCK_ORE_T2   ) tex_offset = all(SS_COLUMNS*2 + 1);
+  if (block_id == ID_BLOCK_COBBLE   ) tex_offset = all(SS_COLUMNS);
+  if (block_id == ID_BLOCK_GLASS    ) tex_offset = all(3*SS_COLUMNS + 1);
+  if (block_id == ID_BLOCK_FLOWER0  ) tex_offset = all(12);
+  if (block_id == ID_BLOCK_FLOWER1  ) tex_offset = all(13);
+  if (block_id == ID_BLOCK_FLOWER2  ) tex_offset = all(2*SS_COLUMNS + 7);
+  if (block_id == ID_BLOCK_SAPLING  ) tex_offset = all(15);
   if (block_id == ID_BLOCK_LOG      ) tex_offset = topped(SS_COLUMNS*1 + 5, SS_COLUMNS*1 + 4);
-  if (block_id == ID_BLOCK_LEAVES   ) tex_offset = 3*SS_COLUMNS + 4;
+  if (block_id == ID_BLOCK_LEAVES   ) tex_offset = all(3*SS_COLUMNS + 4);
   const bdelta = block_id - ID_BLOCK_BREAKING;
-  if (bdelta < 10 && bdelta >= 0) tex_offset = SS_COLUMNS*15 + bdelta;
+  if (bdelta < 10 && bdelta >= 0) tex_offset = all(SS_COLUMNS*15 + bdelta);
 
   return tex_offset;
 }
@@ -601,9 +602,12 @@ let state = {
   using:   { ts_start: Date.now(), ts_end: Date.now() },
   jumping: { tick_start:        0, tick_end:        0, tick_grounded: 0 },
 };
+const MAX_HEIGHT = MAP_SIZE;
+
 const modulo = (n, d) => ((n % d) + d) % d;
-const map_index = (x, y, z) => modulo(x, MAP_SIZE)*MAP_SIZE*MAP_SIZE +
-                               modulo(y, MAP_SIZE)*MAP_SIZE +
+const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+const map_index = (x, y, z) => modulo(x, MAP_SIZE)    *MAP_SIZE*MAP_SIZE +
+                               clamp(y, 0, MAX_HEIGHT)*MAP_SIZE +
                                modulo(z, MAP_SIZE);
 const map_has_chunk = (x, y, z) => {
   const c_x = Math.floor(x / MAP_SIZE);
@@ -700,18 +704,21 @@ function chunk_gen(c_x, c_y, c_z) {
 
       chunk_set(t_x, t_y, t_z, ID_BLOCK_GRASS);
     }
-  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
-    for (let t_y = 0; t_y < MAP_SIZE; t_y++) {
-      const t_z = 0;
-      chunk_set(t_x, t_y, t_z, ID_BLOCK_STONE);
 
-      if (Math.random() < 0.04) chunk_set(t_x, t_y, t_z, ID_BLOCK_ORE_T2);
-    }
+  if (1)
+    for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
+      for (let t_y = 0; t_y < MAP_SIZE; t_y++) {
+        const t_z = 0;
+        chunk_set(t_x, t_y, t_z, ID_BLOCK_STONE);
+
+        if (Math.random() < 0.04) chunk_set(t_x, t_y, t_z, ID_BLOCK_ORE_T2);
+      }
+
   {
     let t_x = 3;
     let t_y = 1;
     let t_z = 1;
-    chunk_set(t_x, t_y, t_z, ID_BLOCK_FURNACE0);
+    chunk_set(t_x, t_y, t_z, ID_BLOCK_TABLE);
   }
   // place_tree(10, 1, 3);
 }
@@ -813,6 +820,7 @@ function ray_to_map(ray_origin, ray_direction) {
     map[ret.side] += step[ret.side];
 
     /* out of bounds */
+    if (map[1] >= MAX_HEIGHT || map[1] < 0) break;
     if (!map_has_chunk(map[0], map[1], map[2])) break;
 
     // sample volume data at calculated position and make collision calculations
@@ -1756,9 +1764,13 @@ function tick() {
           ]
         },
       };
+      const u8_cast = new Uint8Array(geo.cpu_position.buffer);
       function place_cube(t_x, t_y, t_z, tex_offset, opts={}) {
         const { dark_after_vert, positions, indices } = opts.model ?? models.cube;
         const tile_idx_i = vrt_i / VERT_FLOATS;
+
+        const GRID_SIZE = SS_COLUMNS * (opts.subgrid ?? 1);
+        const recip_GRID_SIZE = 1/GRID_SIZE;
 
         for (let i = 0; i < positions.length; i += 3) {
           const face_i = Math.floor(i/3/4);
@@ -1784,23 +1796,19 @@ function tick() {
           if ((i/3)%4 == 1) corner_x = 1, corner_y = 0;
           if ((i/3)%4 == 2) corner_x = 1, corner_y = 1;
           if ((i/3)%4 == 3) corner_x = 0, corner_y = 1;
-          const GRID_SIZE = SS_COLUMNS * (opts.subgrid ?? 1);
           let tex_size_x = opts.tex_size_x;
           let tex_size_y = opts.tex_size_y;
           tex_size_x = Array.isArray(tex_size_x) ? tex_size_x[face_i] : (tex_size_x ?? 1);
           tex_size_y = Array.isArray(tex_size_y) ? tex_size_y[face_i] : (tex_size_y ?? 1);
-          const u =           (tex % GRID_SIZE) + corner_x*tex_size_x;
-          const v = Math.floor(tex / GRID_SIZE) + corner_y*tex_size_y;
+          const u =   (tex % GRID_SIZE) + corner_x*tex_size_x;
+          const v = ~~(tex * recip_GRID_SIZE) + corner_y*tex_size_y;
           geo.cpu_position[vrt_i++] = u / GRID_SIZE;
           geo.cpu_position[vrt_i++] = v / GRID_SIZE;
 
-          const u8_cast = new Uint8Array(
-            geo.cpu_position.buffer,
-            Float32Array.BYTES_PER_ELEMENT * vrt_i++
-          );
           const darken = opts.darken ?? (i >= dark_after_vert);
           const biomed = ((opts.biomed && opts.biomed[face_i]) ?? opts.biomed) ?? 0;
-          u8_cast[0] = (darken << 0) | (biomed << 1);
+          const u8_i = Float32Array.BYTES_PER_ELEMENT * vrt_i++;
+          u8_cast[u8_i] = (darken << 0) | (biomed << 1);
         }
 
         for (const i_o of indices)
@@ -2076,10 +2084,10 @@ function tick() {
             for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
               for (let t_y = 0; t_y < MAP_SIZE; t_y++) 
                 for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
-                  const opts = {};
                   const index = map_index(t_x, t_y, t_z);
-                  let block_id    = chunk.map [index];
-                  opts.block_data = chunk.data[index];
+                  let block_id     = chunk.map [index];
+                  const block_data = chunk.data[index];
+                  const opts = { block_data };
 
                   const w_x = t_x + chunk.x;
                   const w_y = t_y;
@@ -2388,6 +2396,8 @@ function tick() {
             const itm = state.inv.items[inv_i];
             const tex_o = SS_COLUMNS*11 + 24;
 
+            y += btm_pad;
+
             if (mp[0] > x && mp[0] < (x+16) &&
                 mp[1] > y && mp[1] < (y+16)  ) {
               place_ui_quad(view_proj, x, y, 16, 16, tex_o, { z });
@@ -2456,6 +2466,8 @@ function tick() {
           const slot_out = (x, y, inv_i) => {
             let ret = 0;
 
+            y += btm_pad;
+
             const itms = state.inv.items;
             const tex_o = SS_COLUMNS*11 + 24;
 
@@ -2489,7 +2501,7 @@ function tick() {
           const inv_row = i_y => {
             for (let i_x = 0; i_x < 9; i_x++) {
               const x = 8 + i_x*18;
-              const y = btm_pad + i_y;
+              const y = i_y;
 
               slot(x, y, i++);
             }
@@ -2508,7 +2520,7 @@ function tick() {
             for (let i_y = 0; i_y < 2; i_y++)
               for (let i_x = 0; i_x < 2; i_x++) {
                 const i = scratch_i++;
-                slot(88 + 18*i_x, 133 - 18*i_y, i);
+                slot(88 + 18*i_x, 124 - 18*i_y, i);
               }
           }
           if (state.screen == SCREEN_TABLE  ) {
@@ -2517,7 +2529,7 @@ function tick() {
             for (let i_y = 0; i_y < 3; i_y++)
               for (let i_x = 0; i_x < 3; i_x++) {
                 const i = scratch_i++;
-                slot(30 + 18*i_x, 141 - 18*i_y, i);
+                slot(30 + 18*i_x, 132 - 18*i_y, i);
               }
           }
           let tbl_end_i = scratch_i;
@@ -2596,8 +2608,8 @@ function tick() {
             state.inv.items[out_i] = out;
 
             let click;
-            if (state.screen == SCREEN_INV  ) click = slot_out(88 + 56, 133 - 10, out_i);
-            if (state.screen == SCREEN_TABLE) click = slot_out(70 + 56, 133 - 10, out_i);
+            if (state.screen == SCREEN_INV  ) click = slot_out(88 + 56, 124 - 10, out_i);
+            if (state.screen == SCREEN_TABLE) click = slot_out(70 + 56, 124 - 10, out_i);
 
             /* take 1 from each slot */
             if (click)
