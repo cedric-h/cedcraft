@@ -722,6 +722,7 @@ const FIELD_OF_VIEW = 75 / 180 * Math.PI;
 
 const MAP_SIZE = 16;
 const MAX_HEIGHT = 64;
+const MAX_LIGHT = 8;
 
 function id_to_tex_num(block_id) {
   const topped       = (_top, rest, btm=_top) => [rest, _top, rest, rest, btm, rest];
@@ -842,6 +843,7 @@ const map_chunk = (x, y, z) => {
       x: c_x*MAP_SIZE,
       z: c_z*MAP_SIZE,
       map: new Uint8Array(MAP_SIZE * MAX_HEIGHT * MAP_SIZE),
+      light: new Uint8Array(MAP_SIZE * MAX_HEIGHT * MAP_SIZE),
       data: {}, /* same indices as map, has extra data tailored to map id */
     };
     for (let i = 0; i < MAP_SIZE * MAX_HEIGHT * MAP_SIZE; i++)
@@ -851,6 +853,8 @@ const map_chunk = (x, y, z) => {
 }
 const map_get  = (x, y, z   ) =>  map_chunk(x, y, z).map [map_index(x, y, z)];
 const map_data = (x, y, z   ) =>  map_chunk(x, y, z).data[map_index(x, y, z)] ??= {};
+const map_light_set = (x, y, z, v) => map_chunk(x, y, z).light[map_index(x, y, z)] = v;
+const map_light     = (x, y, z   ) => map_chunk(x, y, z).light[map_index(x, y, z)];
 const map_set  = (x, y, z, v) => {
   const chunk = map_chunk(x, y, z);
   const v_before = chunk.map[map_index(x, y, z)];
@@ -1412,7 +1416,7 @@ function geo_draw(geo, gl, program_info, u_mvp) {
   {
     gl.vertexAttribPointer(
       /* index         */ program_info.attrib_locations.a_tex_i,
-      /* numComponents */ 1,
+      /* numComponents */ 2,
       /* type          */ gl.UNSIGNED_BYTE,
       /* normalize     */ false,
       /* stride        */ VERT_FLOATS * Float32Array.BYTES_PER_ELEMENT,
@@ -1452,15 +1456,14 @@ function init_shader_program(gl) {
       gl_Position = u_mvp * a_vpos;
       v_texcoord = a_uv;
 
-      bool darker = mod(floor(a_tex_i.x / 1.0), 2.0) == 1.0;
-      bool biomed = mod(floor(a_tex_i.x / 2.0), 2.0) == 1.0;
-      bool cleary = mod(floor(a_tex_i.x / 4.0), 2.0) == 1.0;
+      float darker = a_tex_i.x;
+      bool biomed = mod(floor(a_tex_i.y / 1.0), 2.0) == 1.0;
+      bool cleary = mod(floor(a_tex_i.y / 2.0), 2.0) == 1.0;
 
       v_color = vec4(1.0);
-      if (darker)
-        v_color.x -= 0.2,
-        v_color.y -= 0.2,
-        v_color.z -= 0.2;
+      v_color.x -= darker/255.0;
+      v_color.y -= darker/255.0;
+      v_color.z -= darker/255.0;
       if (biomed)
         v_color.xyz = mix(
           vec3(0.412, 0.765, 0.314) + 0.1,
@@ -1469,10 +1472,6 @@ function init_shader_program(gl) {
         );
       if (cleary)
         v_color.a -= 0.8;
-      if (cleary && darker)
-        v_color.x -= 0.1,
-        v_color.y -= 0.1,
-        v_color.z -= 0.1;
 
       // if (mod(a_tex_i.z, 2.0) == 1.0) {
       //   gl_Position.z -= 0.001;
@@ -1662,13 +1661,44 @@ async function ss_sprite(gl) {
   gl_upload_image(gl, spritesheet, 0);
 }
 
-const SEC_IN_TICKS = 60;
-function tick() {
-  state.tick++;
+function tick_light(chunk, __x, __y, __z, pending_light_set) {
+  const chunk_index = map_index(__x, __y, __z);
+  if (VOXEL_PERFECT[chunk.map[chunk_index]]) return;
 
+  let light = chunk.light[chunk_index];
+  if (__y == (MAX_HEIGHT-1))
+    light = MAX_LIGHT;
+  else {
+    const above = map_index(__x, __y+1, __z);
+    if (!VOXEL_PERFECT[chunk.map[above]])
+      light = Math.max(light, chunk.light[above]);
+  }
+
+  if (light != chunk.light[chunk_index]) {
+    const t_x = __x + chunk.x;
+    const t_y = __y;
+    const t_z = __z + chunk.z;
+    pending_light_set.push([t_x, t_y, t_z, light]);
+  }
+}
+
+const SEC_IN_TICKS = 60;
+const nbrs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+function tick() {
   const pending_map_set = []; 
   const pending_height_set = []; 
-  const nbrs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  let pending_light_set = []; 
+
+  for (const chunk_key in state.chunks) {
+    const chunk = state.chunks[chunk_key];
+
+    const __y = MAX_HEIGHT - (state.tick % MAX_HEIGHT);
+    for (let __x = 0; __x < MAP_SIZE; __x++) 
+      for (let __z = 0; __z < MAP_SIZE; __z++)
+        tick_light(chunk, __x, __y, __z, pending_light_set);
+  }
+  state.tick++;
+
   if ((state.tick % (SEC_IN_TICKS/2)) == 0)
     for (const chunk_key in state.chunks) {
       const chunk = state.chunks[chunk_key];
@@ -1676,7 +1706,9 @@ function tick() {
       for (let __x = 0; __x < MAP_SIZE; __x++) 
         for (let __y = 0; __y < MAX_HEIGHT; __y++) 
           for (let __z = 0; __z < MAP_SIZE; __z++) {
-            let block_id = chunk.map[map_index(__x, __y, __z)];
+
+            const chunk_index = map_index(__x, __y, __z);
+            let block_id = chunk.map[chunk_index];
             if (block_id == ID_BLOCK_NONE) continue;
 
             const t_x = __x + chunk.x;
@@ -1821,6 +1853,22 @@ function tick() {
     }
   pending_map_set.forEach(([x, y, z, v]) => map_set(x, y, z, v));
   pending_height_set.forEach(([x, y, z, v]) => map_data(x, y, z, v).height = v);
+  while (pending_light_set.length > 0) {
+    const [x, y, z, v] = pending_light_set.pop();
+    const chunk = map_chunk(x, y, z);
+    map_light_set(x, y, z, v);
+
+    chunk.dirty = 1;
+
+    for (const [o_x, o_z] of nbrs) {
+      const t_x = o_x + x;
+      const t_z = o_z + z;
+      if (map_has_chunk(t_x, y, t_z)) {
+        if (map_light(t_x, y, t_z) < (v-1))
+          pending_light_set.push([t_x, y, t_z, v-1]);
+      }
+    }
+  }
 
   /* apply gravity to items */
   for (const i of state.items) {
@@ -2172,8 +2220,10 @@ const {
       const darken = opts.darken ?? (i >= dark_after_vert);
       const biomed = ((opts.biomed && opts.biomed[face_i]) ?? opts.biomed) ?? 0;
       const cleary = opts.cleary ?? 0;
-      const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i++;
-      u8_cast[u8_i] = (darken << 0) | (biomed << 1) | (cleary << 2);
+      const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
+      geo.vrt_i += 1;
+      u8_cast[u8_i] = darken*0.2*255;
+      u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
     }
 
     for (const i_o of indices)
@@ -2217,11 +2267,13 @@ const {
 
       const u8_cast = new Uint8Array(
         geo.cpu_position.buffer,
-        Float32Array.BYTES_PER_ELEMENT * geo.vrt_i++
+        Float32Array.BYTES_PER_ELEMENT * geo.vrt_i
       );
+      geo.vrt_i += 1;
       const darken = opts.darken ?? 0;
       const biomed = 0;
-      u8_cast[0] = (darken << 0) | (biomed << 1);
+      u8_cast[0] = darken*0.2*255;
+      u8_cast[1] = (biomed << 0);
     }
 
     for (const i_o of [
@@ -2500,13 +2552,34 @@ function geo_chunk(geo, chunk) {
     positions[3*3 + b] = 0;
     positions[3*3 + c] = 0;
 
+    const light_global_lookup = () => (
+      map_has_chunk(chunk.x+t[0], t[1], chunk.z+t[2])
+        ? map_light(chunk.x+t[0], t[1], chunk.z+t[2])
+        : MAX_LIGHT
+    );
+    const block_global_lookup = () => (
+      (c == 1)
+        ? ID_BLOCK_NONE
+        : (map_has_chunk(chunk.x+t[0], t[1], chunk.z+t[2])
+            ?   map_get(chunk.x+t[0], t[1], chunk.z+t[2])
+            : ID_BLOCK_NONE)
+    );
+
     for (t[a] = 0; t[a] < max[a]; t[a]++)
       for (t[b] = 0; t[b] < max[b]; t[b]++) {
-        let _last = ID_BLOCK_NONE;
+        t[c] = -1;
+        let _last = block_global_lookup();
+        let _last_light = light_global_lookup();
 
         for (t[c] = 0; t[c] <= max[c]; t[c]++) {
+          const chunk_index = map_index(t[0], t[1], t[2]);
+
+          const last_light = _last_light;
+          const light = (t[c] == max[c]) ? light_global_lookup() : chunk.light[chunk_index];
+          _last_light = light;
+
           const last = _last;
-          const now = (t[c] == max[c]) ? ID_BLOCK_NONE : chunk.map[map_index(t[0], t[1], t[2])];
+          const now = (t[c] == max[c]) ? block_global_lookup() : chunk.map[chunk_index];
           _last = now;
 
           if (VOXEL_PERFECT[last] == VOXEL_PERFECT[now]) continue;
@@ -2526,11 +2599,13 @@ function geo_chunk(geo, chunk) {
             geo.cpu_position[geo.vrt_i++] = u * recip_GRID_SIZE;
             geo.cpu_position[geo.vrt_i++] = v * recip_GRID_SIZE;
 
-            const darken = VOXEL_PERFECT[now];
+            const darken = 1 - (VOXEL_PERFECT[now] ? last_light : light)/MAX_LIGHT;
             const biomed = TEX_BIOMED[tex];
             const cleary = 0;
-            const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i++;
-            u8_cast[u8_i] = (darken << 0) | (biomed << 1) | (cleary << 2);
+            const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
+            geo.vrt_i += 1;
+            u8_cast[u8_i+0] = ease_out_sine(darken)*0.85*255;
+            u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
           }
 
           for (const i_o of indices)
@@ -2555,8 +2630,10 @@ function geo_chunk(geo, chunk) {
               const darken = VOXEL_PERFECT[now];
               const biomed = 1;
               const cleary = 0;
-              const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i++;
-              u8_cast[u8_i] = (darken << 0) | (biomed << 1) | (cleary << 2);
+              const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
+              geo.vrt_i += 1;
+              u8_cast[u8_i+0] = darken*0.2*255;
+              u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
             }
 
             for (const i_o of indices)
@@ -2680,10 +2757,12 @@ function geo_fill(geo, gl, program_info, render_stage) {
       const chunk = state.chunks[chunk_key];
 
       if (render_stage == 0) {
-        if (!chunk.dirty) {
-          geo_draw(chunk.geo, gl, program_info, geo.default_view_proj);
+        if (!chunk.dirty || state.tick == window.last_chunk_tick) {
+          if (chunk.geo)
+            geo_draw(chunk.geo, gl, program_info, geo.default_view_proj);
           continue;
         }
+        window.last_chunk_tick = state.tick;
 
         // chunk.geo ??= geo_create(
         //   gl,
