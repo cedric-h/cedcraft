@@ -52,6 +52,12 @@ function ease_out_sine(x) {
 function ease_out_circ(x) {
   return Math.sqrt(1 - Math.pow(x - 1, 2));
 }
+function ease_out_expo(x) {
+  return x === 1 ? 1 : 1 - Math.pow(2, -10 * x);
+}
+function ease_in_expo(x) {
+  return x === 0 ? 0 : Math.pow(2, 10 * x - 10);
+}
 
 function noise3(
   x,      y,      z,
@@ -826,35 +832,41 @@ const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 const map_index = (x, y, z) => modulo(x, MAP_SIZE)    *MAP_SIZE*MAX_HEIGHT +
                                clamp(y, 0, MAX_HEIGHT)*MAP_SIZE +
                                modulo(z, MAP_SIZE);
-const map_has_chunk = (x, y, z) => {
+const map_chunk_add = (x, y, z) => {
   const c_x = Math.floor(x / MAP_SIZE);
   const c_z = Math.floor(z / MAP_SIZE);
   const chunk_key = c_x + ',' + c_z;
-  return state.chunks[chunk_key] != undefined;
+
+  state.chunks[chunk_key] = {
+    genned: false,
+    dirty: true,
+    x: c_x*MAP_SIZE,
+    z: c_z*MAP_SIZE,
+    map: new Uint8Array(MAP_SIZE * MAX_HEIGHT * MAP_SIZE),
+    light_src: new Uint8Array(MAP_SIZE * MAX_HEIGHT * MAP_SIZE).fill(MAX_LIGHT),
+    light:     new Uint8Array(MAP_SIZE * MAX_HEIGHT * MAP_SIZE),
+    data: {}, /* same indices as map, has extra data tailored to map id */
+  };
+
+  /* non-existent lookups must be expensive, or maybe this serves as
+   * an allocation hint. either way, profiler (seems to) like having it */
+  for (let i = 0; i < MAP_SIZE * MAX_HEIGHT * MAP_SIZE; i++)
+    state.chunks[chunk_key].data[i] = undefined;
+
+  return state.chunks[chunk_key];
 }
 const map_chunk = (x, y, z) => {
   const c_x = Math.floor(x / MAP_SIZE);
   const c_z = Math.floor(z / MAP_SIZE);
   const chunk_key = c_x + ',' + c_z;
-  if (state.chunks[chunk_key] == undefined) {
-    state.chunks[chunk_key] = {
-      genned: false,
-      dirty: true,
-      x: c_x*MAP_SIZE,
-      z: c_z*MAP_SIZE,
-      map: new Uint8Array(MAP_SIZE * MAX_HEIGHT * MAP_SIZE),
-      light: new Uint8Array(MAP_SIZE * MAX_HEIGHT * MAP_SIZE),
-      data: {}, /* same indices as map, has extra data tailored to map id */
-    };
-    for (let i = 0; i < MAP_SIZE * MAX_HEIGHT * MAP_SIZE; i++)
-      state.chunks[chunk_key].data[i] = undefined;
-  }
   return state.chunks[chunk_key];
 }
 const map_get  = (x, y, z   ) =>  map_chunk(x, y, z).map [map_index(x, y, z)];
 const map_data = (x, y, z   ) =>  map_chunk(x, y, z).data[map_index(x, y, z)] ??= {};
-const map_light_set = (x, y, z, v) => map_chunk(x, y, z).light[map_index(x, y, z)] = v;
-const map_light     = (x, y, z   ) => map_chunk(x, y, z).light[map_index(x, y, z)];
+const map_light_set     = (x, y, z, v) => map_chunk(x, y, z).light    [map_index(x, y, z)] = v;
+const map_light         = (x, y, z   ) => map_chunk(x, y, z).light    [map_index(x, y, z)];
+const map_light_src_set = (x, y, z, v) => map_chunk(x, y, z).light_src[map_index(x, y, z)] = v;
+const map_light_src     = (x, y, z   ) => map_chunk(x, y, z).light_src[map_index(x, y, z)];
 const map_set  = (x, y, z, v) => {
   const chunk = map_chunk(x, y, z);
   const v_before = chunk.map[map_index(x, y, z)];
@@ -921,6 +933,16 @@ function place_tree(t_x, t_y, t_z) {
 }
 
 function chunk_gen(c_x, c_y, c_z) {
+  const chunk = map_chunk(c_x, c_y, c_z) ?? map_chunk_add(c_x, c_y, c_z);
+  chunk.light_src.fill(0);
+
+  for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nc_x = c_x + x*16;
+    const nc_z = c_z + z*16;
+    if (map_chunk(nc_x, 0, nc_z) == undefined)
+      map_chunk_add(nc_x, 0, nc_z);
+  }
+
   const cave = [...Array(MAP_SIZE*MAX_HEIGHT*MAP_SIZE)].fill(0);
   const dirt_height = [...Array(MAP_SIZE*MAP_SIZE)].fill(0);
   const stone_height = [...Array(MAP_SIZE*MAP_SIZE)].fill(0);
@@ -944,6 +966,7 @@ function chunk_gen(c_x, c_y, c_z) {
     }
 
   map_chunk(c_x, c_y, c_z).genned = 1;
+  const chunk_light_src_set = (x, y, z, val) => map_light_src_set(c_x + x, c_y + y, c_z + z, val);
   const chunk_set = (x, y, z, val) => map_set(c_x + x, c_y + y, c_z + z, val);
   const chunk_get = (x, y, z     ) => map_get(c_x + x, c_y + y, c_z + z     );
 
@@ -964,7 +987,7 @@ function chunk_gen(c_x, c_y, c_z) {
       if (!cave[map_index(t_x, t_y, t_z)])
         chunk_set(t_x, t_y, t_z, ID_BLOCK_GRASS);
 
-      for (let i = 0; i < t_y; i++) {
+      for (let i = 0; i <= t_y; i++) {
         if (i > 0 && cave[map_index(t_x, i, t_z)])
           continue;
 
@@ -990,8 +1013,9 @@ function chunk_gen(c_x, c_y, c_z) {
             for (let i = 0; i < vein_size; i++) {
               v[Math.floor(Math.random() * 3)] += (Math.random() < 0.5) ? -1 : 1;
 
-              if (chunk_get(t_x, t_y, t_z) == ID_BLOCK_STONE)
-                chunk_set(v[0], v[1], v[2], ID_BLOCK_ORE_T2);
+              if (chunk == map_chunk(c_x + v[0], c_y + v[1], c_z + v[2]))
+                if (chunk_get(v[0], v[1], v[2]) == ID_BLOCK_STONE)
+                  chunk_set(v[0], v[1], v[2], ID_BLOCK_ORE_T2);
             }
           }
         }
@@ -1004,7 +1028,22 @@ function chunk_gen(c_x, c_y, c_z) {
     let t_z = 1+i;
     chunk_set(t_x, t_y, t_z, ID_BLOCK_WATER);
   }
-  place_tree(c_x + 10, c_y + 31, c_z + 3);
+  
+  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
+    for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
+      let t_y = MAX_HEIGHT-1;
+      while (t_y > 0) {
+        const block_id = chunk_get(t_x, t_y, t_z);
+        if (VOXEL_PERFECT[block_id]) {
+          if (block_id == ID_BLOCK_DIRT)
+            chunk_set(t_x, t_y, t_z, ID_BLOCK_GRASS);
+          break;
+        }
+        chunk_light_src_set(t_x, t_y, t_z, MAX_LIGHT);
+        t_y--;
+      }
+    }
+  // place_tree(c_x + 10, c_y + 31, c_z + 3);
 }
 
 /* used for player & particle vs. world collision */
@@ -1022,8 +1061,9 @@ function pin_to_empty(ent) {
     const new_block = [Math.floor(coord[0]),
                        Math.floor(coord[1]),
                        Math.floor(coord[2])];
-    const md = map_data(new_block[0], new_block[1], new_block[2]);
-    const block = map_get(new_block[0], new_block[1], new_block[2])
+    const exists = map_chunk(new_block[0], new_block[1], new_block[2]);
+    const md = exists ? map_data(new_block[0], new_block[1], new_block[2]) : {};
+    const block = exists ? map_get(new_block[0], new_block[1], new_block[2]) : ID_BLOCK_STONE;
 
     let hard = 1;
     const   delta = new_pos[i] - pos[i];
@@ -1102,7 +1142,7 @@ function ray_to_map(ray_origin, ray_direction) {
 
     /* out of bounds */
     if (map[1] >= MAX_HEIGHT || map[1] < 0) break;
-    if (!map_has_chunk(map[0], map[1], map[2])) break;
+    if (map_chunk(map[0], map[1], map[2]) == undefined) break;
 
     // sample volume data at calculated position and make collision calculations
     ret.last_coord = ret.coord;
@@ -1660,29 +1700,28 @@ async function ss_sprite(gl) {
   gl_upload_image(gl, spritesheet, 0);
 }
 
-function tick_light(chunk, __x, __y, __z, pending_light_set) {
+function tick_light_src(chunk, __x, __y, __z) {
   const chunk_index = map_index(__x, __y, __z);
   if (VOXEL_PERFECT[chunk.map[chunk_index]]) return;
 
-  let light = chunk.light[chunk_index];
+  let light = chunk.light_src[chunk_index];
   if (__y == (MAX_HEIGHT-1))
     light = MAX_LIGHT;
   else {
-    const above = map_index(__x, __y+1, __z);
-    if (!VOXEL_PERFECT[chunk.map[above]])
-      light = Math.max(light, chunk.light[above]);
+    const above_i = map_index(__x, __y+1, __z);
+    const above_light = VOXEL_PERFECT[chunk.map[above_i]] ? 0 : chunk.light_src[above_i];
+    light = above_light;
   }
 
-  if (light != chunk.light[chunk_index]) {
-    const t_x = __x + chunk.x;
-    const t_y = __y;
-    const t_z = __z + chunk.z;
-    pending_light_set.push([t_x, t_y, t_z, light]);
+  if (chunk.light_src[chunk_index] != light) {
+    chunk.light_src[chunk_index] = light;
+    return 1;
   }
+  return 0;
 }
 
 const SEC_IN_TICKS = 60;
-const nbrs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const light_worker = new Worker("light_worker.js");
 function tick() {
   const pending_map_set = []; 
   const pending_height_set = []; 
@@ -1691,10 +1730,24 @@ function tick() {
   for (const chunk_key in state.chunks) {
     const chunk = state.chunks[chunk_key];
 
-    const __y = MAX_HEIGHT - (state.tick % MAX_HEIGHT);
+    const __y = MAX_HEIGHT - 1 - (state.tick % MAX_HEIGHT);
+
+    let any_change = 0;
     for (let __x = 0; __x < MAP_SIZE; __x++) 
-      for (let __z = 0; __z < MAP_SIZE; __z++)
-        tick_light(chunk, __x, __y, __z, pending_light_set);
+      for (let __z = 0; __z < MAP_SIZE; __z++) {
+        if (tick_light_src(chunk, __x, __y, __z))
+          any_change = 1;
+      }
+    if (any_change) {
+      for (let __y = 0; __y < MAX_HEIGHT; __y++) 
+        for (let __x = 0; __x < MAP_SIZE; __x++) 
+          for (let __z = 0; __z < MAP_SIZE; __z++)
+            tick_light_src(chunk, __x, MAX_HEIGHT -1 - __y, __z);
+
+      const { x, z, light_src } = chunk;
+      light_worker.postMessage({ chunk: { key: chunk_key, x, z, light_src } });
+      light_worker.postMessage({ compute: 1 });
+    }
   }
   state.tick++;
 
@@ -1761,8 +1814,11 @@ function tick() {
                 const w_x = t_x + Math.round(lerp(-1.5, 1.5, Math.random()));
                 const w_y = t_y;
                 const w_z = t_z + Math.round(lerp(-1.5, 1.5, Math.random()));
-                if (map_get(w_x, w_y, w_z) == ID_BLOCK_DIRT &&
-                    !VOXEL_PERFECT[map_get(w_x, w_y+1, w_z)])
+                if (
+                  map_chunk(w_x, w_y, w_z) &&
+                  map_get(w_x, w_y, w_z) == ID_BLOCK_DIRT &&
+                  !VOXEL_PERFECT[map_get(w_x, w_y+1, w_z)]
+                )
                   pending_map_set.push([w_x, w_y, w_z, ID_BLOCK_GRASS]);
               }
             }
@@ -1772,6 +1828,7 @@ function tick() {
               for (let o_x = -2; o_x <= 2; o_x++) 
                 for (let o_y = -2; o_y <= 2; o_y++) 
                   for (let o_z = -2; o_z <= 2; o_z++) {
+                    if (!map_chunk(o_x + t_x, o_y + t_y, o_z + t_z)) continue;
                     const nbr = map_get(o_x + t_x, o_y + t_y, o_z + t_z);
                     if (nbr == ID_BLOCK_LOG) decay = 0;
                   }
@@ -1852,22 +1909,12 @@ function tick() {
     }
   pending_map_set.forEach(([x, y, z, v]) => map_set(x, y, z, v));
   pending_height_set.forEach(([x, y, z, v]) => map_data(x, y, z, v).height = v);
-  while (pending_light_set.length > 0) {
-    const [x, y, z, v] = pending_light_set.pop();
-    const chunk = map_chunk(x, y, z);
-    map_light_set(x, y, z, v);
-
-    chunk.dirty = 1;
-
-    for (const [o_x, o_z] of nbrs) {
-      const t_x = o_x + x;
-      const t_z = o_z + z;
-      if (map_has_chunk(t_x, y, t_z)) {
-        if (map_light(t_x, y, t_z) < (v-1))
-          pending_light_set.push([t_x, y, t_z, v-1]);
-      }
+  pending_light_set.forEach(([x, y, z, v]) => {
+    if (map_light(x, y, z) != v) {
+      map_light_set(x, y, z, v);
+      map_chunk(x, y, z).dirty = 1;
     }
-  }
+  });
 
   /* apply gravity to items */
   for (const i of state.items) {
@@ -2552,15 +2599,15 @@ function geo_chunk(geo, chunk) {
     positions[3*3 + c] = 0;
 
     const light_global_lookup = () => (
-      map_has_chunk(chunk.x+t[0], t[1], chunk.z+t[2])
+      (map_chunk(    chunk.x+t[0], t[1], chunk.z+t[2]) != undefined)
         ? map_light(chunk.x+t[0], t[1], chunk.z+t[2])
         : MAX_LIGHT
     );
     const block_global_lookup = () => (
       (c == 1)
         ? ID_BLOCK_NONE
-        : (map_has_chunk(chunk.x+t[0], t[1], chunk.z+t[2])
-            ?   map_get(chunk.x+t[0], t[1], chunk.z+t[2])
+        : ((map_chunk(   chunk.x+t[0], t[1], chunk.z+t[2]) != undefined)
+            ?   map_get( chunk.x+t[0], t[1], chunk.z+t[2])
             : ID_BLOCK_NONE)
     );
 
@@ -2603,7 +2650,7 @@ function geo_chunk(geo, chunk) {
             const cleary = 0;
             const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
             geo.vrt_i += 1;
-            u8_cast[u8_i+0] = lerp(0.15, 1, ease_out_sine(darken))*255;
+            u8_cast[u8_i+0] = lerp(0.15, 1, ease_in_expo(darken))*255;
             u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
           }
 
@@ -2631,7 +2678,7 @@ function geo_chunk(geo, chunk) {
               const cleary = 0;
               const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
               geo.vrt_i += 1;
-              u8_cast[u8_i+0] = lerp(0.15, 1, ease_out_sine(darken))*255;
+              u8_cast[u8_i+0] = lerp(0.15, 1, ease_in_expo(darken))*255;
               u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
             }
 
@@ -3321,9 +3368,14 @@ function geo_fill(geo, gl, program_info, render_stage) {
       itms[out_i] = 0;
     }
 
-    const md = map_data(state.screen_block_coord[0],
-                        state.screen_block_coord[1],
-                        state.screen_block_coord[2]);
+    const md = 
+      map_chunk(state.screen_block_coord[0],
+                state.screen_block_coord[1],
+                state.screen_block_coord[2])
+      ? map_data(state.screen_block_coord[0],
+                 state.screen_block_coord[1],
+                 state.screen_block_coord[2])
+      : 0
     if (state.screen == SCREEN_FURNACE && md && md.inv) {
       const furnace_inv = md.inv;
 
@@ -3385,6 +3437,21 @@ function geo_fill(geo, gl, program_info, render_stage) {
   chunk_gen( 16, 0, -16);
   chunk_gen(-16, 0, -16);
   chunk_gen(-16, 0,  16);
+
+  for (const chunk_key in state.chunks) {
+    const chunk = state.chunks[chunk_key];
+    chunk.light.set(chunk.light_src);
+
+    const { x, z, light_src } = chunk;
+    light_worker.postMessage({ chunk: { key: chunk_key, x, z, light_src } });
+  }
+  light_worker.postMessage({ compute: 1 });
+
+  light_worker.onmessage = ({ data }) => {
+    console.log("received chunk from worker");
+    state.chunks[data.chunk_key].light = data.light;
+    state.chunks[data.chunk_key].dirty = 1;
+  };
 
   if (gl === null) alert(
     "Unable to initialize WebGL. Your browser or machine may not support it."
