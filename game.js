@@ -871,7 +871,7 @@ state.inv.items[1+1] = { id: ID_ITEM_T0_PICK, amount: 1 };
 state.inv.items[1+2] = { id: ID_ITEM_T0_AXE, amount: 1 };
 state.inv.items[1+3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
 state.inv.items[1+4] = { id: ID_BLOCK_SAPLING, amount: 10 };
-state.inv.items[1+5] = { id: ID_BLOCK_LOG, amount: 20 };
+state.inv.items[1+5] = { id: ID_BLOCK_GRASS, amount: 20 };
 function state_drop(i, amt) {
   const itms = state.inv.items;
   if (itms[i] != 0) {
@@ -1456,20 +1456,19 @@ function init_shader_program(gl) {
       gl_Position = u_mvp * a_vpos;
       v_texcoord = a_uv;
 
-      float darker = a_tex_i.x;
+      float light = a_tex_i.x / 255.0;
       bool biomed = mod(floor(a_tex_i.y / 1.0), 2.0) == 1.0;
       bool cleary = mod(floor(a_tex_i.y / 2.0), 2.0) == 1.0;
 
       v_color = vec4(1.0);
-      v_color.x -= darker/255.0;
-      v_color.y -= darker/255.0;
-      v_color.z -= darker/255.0;
       if (biomed)
         v_color.xyz = mix(
           vec3(0.412, 0.765, 0.314) + 0.1,
           vec3(0.196, 0.549, 0.235) + 0.1,
-          0.01
+          0.1
         );
+      v_color.xyz *= light;
+
       if (cleary)
         v_color.a -= 0.8;
 
@@ -2108,7 +2107,7 @@ const {
       ]
     },
     x: {
-      dark_after_vert: 3*4*1,
+      dark_after_vert: 1e9,
       positions: new Float32Array([
         1, 1, 0.5,   0, 1, 0.5,    0, 0, 0.5,  1, 0, 0.5,    // Front face
         0.5, 1, 0,   0.5, 1, 1,   0.5, 0, 1,    0.5, 0, 0,   // Right face
@@ -2222,7 +2221,7 @@ const {
       const cleary = opts.cleary ?? 0;
       const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
       geo.vrt_i += 1;
-      u8_cast[u8_i] = darken*0.2*255;
+      u8_cast[u8_i] = (1 - darken*0.2)*255;
       u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
     }
 
@@ -2272,7 +2271,7 @@ const {
       geo.vrt_i += 1;
       const darken = opts.darken ?? 0;
       const biomed = 0;
-      u8_cast[0] = darken*0.2*255;
+      u8_cast[0] = (1 - darken*0.2)*255;
       u8_cast[1] = (biomed << 0);
     }
 
@@ -2599,12 +2598,12 @@ function geo_chunk(geo, chunk) {
             geo.cpu_position[geo.vrt_i++] = u * recip_GRID_SIZE;
             geo.cpu_position[geo.vrt_i++] = v * recip_GRID_SIZE;
 
-            const darken = 1 - (VOXEL_PERFECT[now] ? last_light : light)/MAX_LIGHT;
+            const darken = (VOXEL_PERFECT[now] ? last_light : light)/MAX_LIGHT;
             const biomed = TEX_BIOMED[tex];
             const cleary = 0;
             const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
             geo.vrt_i += 1;
-            u8_cast[u8_i+0] = ease_out_sine(darken)*0.85*255;
+            u8_cast[u8_i+0] = lerp(0.15, 1, ease_out_sine(darken))*255;
             u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
           }
 
@@ -2627,12 +2626,12 @@ function geo_chunk(geo, chunk) {
               geo.cpu_position[geo.vrt_i++] = u * recip_GRID_SIZE;
               geo.cpu_position[geo.vrt_i++] = v * recip_GRID_SIZE;
 
-              const darken = VOXEL_PERFECT[now];
+              const darken = (VOXEL_PERFECT[now] ? last_light : light)/MAX_LIGHT;
               const biomed = 1;
               const cleary = 0;
               const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
               geo.vrt_i += 1;
-              u8_cast[u8_i+0] = darken*0.2*255;
+              u8_cast[u8_i+0] = lerp(0.15, 1, ease_out_sine(darken))*255;
               u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
             }
 
