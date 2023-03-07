@@ -20,7 +20,7 @@ const map_light_src     = (x, y, z   ) => map_chunk(x, y, z).light_src[map_index
 const map_light         = (x, y, z   ) => map_chunk(x, y, z).light    [map_index(x, y, z)];
 const map_light_set     = (x, y, z, v) => map_chunk(x, y, z).light    [map_index(x, y, z)] = v;
 
-function chunk_light_from_src(chunk) {
+function chunk_light_from_src(chunk, chunk_out) {
   for (let __x = 0; __x < MAP_SIZE; __x++) 
     for (let __y = 0; __y < MAX_HEIGHT; __y++) 
       for (let __z = 0; __z < MAP_SIZE; __z++) {
@@ -29,24 +29,22 @@ function chunk_light_from_src(chunk) {
         const t_y =           __y;
         const t_z = chunk.z + __z;
 
-        if (map_light_src(t_x, t_y, t_z)) {
-          for (let o_x = -MAX_LIGHT; o_x <= MAX_LIGHT; o_x++)
-            for (let o_z = -MAX_LIGHT; o_z <= MAX_LIGHT; o_z++) {
-              const n_x = t_x + o_x;
-              const n_y = t_y;
-              const n_z = t_z + o_z;
-              if (map_chunk(n_x, n_y, n_z) == undefined) continue;
-
-              const light_now = map_light(n_x, n_y, n_z);
-              const diffuse = MAX_LIGHT - (Math.abs(o_x) + Math.abs(o_z));
-              map_light_set(n_x, n_y, n_z, Math.max(light_now, diffuse));
-            }
+        let light = Math.max(0, map_light(t_x, t_y, t_z)-1);
+        if (map_light_src(t_x, t_y, t_z))
+          light = MAX_LIGHT;
+        else {
+          for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            let nbr_light = map_light(t_x+x, t_y, t_z+z);
+            light = Math.max(light, nbr_light-1);
+          }
         }
+        chunk_out[map_index(__x, __y, __z)] = light;
       }
 }
 
 let n_computes = 0;
 
+const chunk_out = new Uint8Array(MAP_SIZE*MAP_SIZE*MAX_HEIGHT);
 onmessage = ({ data }) => {
   if (data.chunk) {
     state.chunks[data.chunk.key] = {
@@ -58,25 +56,21 @@ onmessage = ({ data }) => {
   }
 
   if (data.compute) {
-    for (const chunk_key in state.chunks)
-      state.chunks[chunk_key].light.fill(0);
+    for (const chunk_key in state.chunks) {
+      const chunk = state.chunks[chunk_key];
+      chunk.light.fill(0);
+    }
 
-    const keys = Object.keys(state.chunks);
-    const compute = ++n_computes;
-    (function do_chunk() {
-      if (compute != n_computes) {
-        console.log(`I'm compute ${compute} but current compute is ${n_computes}, bailing`);
-        return;
+    for (let i = 0; i < MAX_LIGHT; i++) {
+      for (const chunk_key in state.chunks) {
+        const chunk = state.chunks[chunk_key];
+        chunk_out.fill(0);
+        chunk_light_from_src(chunk, chunk_out);
+        chunk.light.set(chunk_out);
       }
+    }
 
-      console.log(`do_chunk: ${keys.length} keys left in ${n_computes} compute`);
-      if (keys.length == 0) return;
-
-      const chunk_key = keys.pop();
-      chunk_light_from_src(state.chunks[chunk_key]);
+    for (const chunk_key in state.chunks)
       postMessage({ chunk_key, light: state.chunks[chunk_key].light });
-
-      setTimeout(do_chunk);
-    })();
   }
 }
