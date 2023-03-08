@@ -665,6 +665,7 @@ const ID_BLOCK_NONE     = _id++;
 const ID_BLOCK_DIRT     = _id++;
 const ID_BLOCK_STONE    = _id++;
 const ID_BLOCK_ORE_T2   = _id++;
+const ID_BLOCK_ORE_COAL = _id++;
 const ID_BLOCK_COBBLE   = _id++;
 const ID_BLOCK_WOOD     = _id++;
 const ID_BLOCK_TABLE    = _id++;
@@ -674,6 +675,7 @@ const ID_BLOCK_STAIRS   = _id++;
 const ID_BLOCK_WATER    = _id++;
 const ID_BLOCK_GRASS    = _id++;
 const ID_BLOCK_GLASS    = _id++;
+const ID_BLOCK_TORCH    = _id++;
 const ID_BLOCK_FLOWER0  = _id++;
 const ID_BLOCK_FLOWER1  = _id++;
 const ID_BLOCK_FLOWER2  = _id++;
@@ -684,6 +686,8 @@ const ID_BLOCK_BREAKING = _id; _id += 10;
 const ID_BLOCK_LAST = _id-1;
 
 const ID_ITEM_BONEMEAL  = _id++;
+const ID_ITEM_COAL      = _id++;
+const ID_ITEM_STICK     = _id++;
 const ID_ITEM_T2_INGOT  = _id++;
 const ID_ITEM_T0_SPADE  = _id++;
 const ID_ITEM_T0_PICK   = _id++;
@@ -694,6 +698,7 @@ const VOXEL_PERFECT = [...Array(_id)].fill(0);
 VOXEL_PERFECT[ID_BLOCK_DIRT    ] = 1;
 VOXEL_PERFECT[ID_BLOCK_STONE   ] = 1;
 VOXEL_PERFECT[ID_BLOCK_ORE_T2  ] = 1;
+VOXEL_PERFECT[ID_BLOCK_ORE_COAL] = 1;
 VOXEL_PERFECT[ID_BLOCK_COBBLE  ] = 1;
 VOXEL_PERFECT[ID_BLOCK_WOOD    ] = 1;
 VOXEL_PERFECT[ID_BLOCK_TABLE   ] = 1;
@@ -702,18 +707,6 @@ VOXEL_PERFECT[ID_BLOCK_FURNACE1] = 1;
 VOXEL_PERFECT[ID_BLOCK_GRASS   ] = 1;
 // VOXEL_PERFECT[ID_BLOCK_LOG     ] = 1;
 VOXEL_PERFECT[ID_BLOCK_LEAVES  ] = 1; /* for now */
-
-const VOXEL_CLEAR = [...Array(_id)].fill(0);
-VOXEL_CLEAR[ID_BLOCK_NONE    ] = 1;
-VOXEL_CLEAR[ID_BLOCK_STAIRS  ] = 1;
-VOXEL_CLEAR[ID_BLOCK_WATER   ] = 1;
-VOXEL_CLEAR[ID_BLOCK_GLASS   ] = 1;
-VOXEL_CLEAR[ID_BLOCK_FLOWER0 ] = 1;
-VOXEL_CLEAR[ID_BLOCK_FLOWER1 ] = 1;
-VOXEL_CLEAR[ID_BLOCK_FLOWER2 ] = 1;
-VOXEL_CLEAR[ID_BLOCK_SAPLING ] = 1;
-VOXEL_CLEAR[ID_BLOCK_LEAVES  ] = 1;
-VOXEL_CLEAR[ID_BLOCK_BREAKING] = 1;
 
 const TEX_BIOMED = Array();
 TEX_BIOMED[id_to_tex_num(ID_BLOCK_GRASS  )[1]] = 1;
@@ -737,7 +730,9 @@ function id_to_tex_num(block_id) {
 
   let tex_offset = 0;
   if (block_id == ID_ITEM_BONEMEAL  ) tex_offset = SS_COLUMNS*11 + 31;
-  if (block_id == ID_ITEM_T2_INGOT  ) tex_offset = SS_COLUMNS* 1 +  7 + 16;
+  if (block_id == ID_ITEM_COAL      ) tex_offset = SS_COLUMNS*0 + 16+7;
+  if (block_id == ID_ITEM_STICK     ) tex_offset = SS_COLUMNS*3 + 16+5;
+  if (block_id == ID_ITEM_T2_INGOT  ) tex_offset = SS_COLUMNS*1 + 16+7;
   if (block_id == ID_ITEM_T0_SPADE  ) tex_offset = SS_COLUMNS*5 + 16;
   if (block_id == ID_ITEM_T0_PICK   ) tex_offset = SS_COLUMNS*6 + 16;
   if (block_id == ID_ITEM_T0_AXE    ) tex_offset = SS_COLUMNS*7 + 16;
@@ -757,8 +752,10 @@ function id_to_tex_num(block_id) {
   if (block_id == ID_BLOCK_DIRT     ) tex_offset = all(2);
   if (block_id == ID_BLOCK_STONE    ) tex_offset = all(1);
   if (block_id == ID_BLOCK_ORE_T2   ) tex_offset = all(SS_COLUMNS*2 + 1);
+  if (block_id == ID_BLOCK_ORE_COAL ) tex_offset = all(SS_COLUMNS*2 + 2);
   if (block_id == ID_BLOCK_COBBLE   ) tex_offset = all(SS_COLUMNS);
   if (block_id == ID_BLOCK_GLASS    ) tex_offset = all(3*SS_COLUMNS + 1);
+  if (block_id == ID_BLOCK_TORCH    ) tex_offset = all(5*SS_COLUMNS);
   if (block_id == ID_BLOCK_FLOWER0  ) tex_offset = all(12);
   if (block_id == ID_BLOCK_FLOWER1  ) tex_offset = all(13);
   if (block_id == ID_BLOCK_FLOWER2  ) tex_offset = all(2*SS_COLUMNS + 7);
@@ -775,6 +772,10 @@ const SCREEN_WORLD      = 0;
 const SCREEN_INV        = 1;
 const SCREEN_TABLE      = 2;
 const SCREEN_FURNACE    = 3;
+
+const LIGHT_SRC_NONE  = 0;
+const LIGHT_SRC_SUN   = 1;
+const LIGHT_SRC_TORCH = 2;
 
 /* where crafting table, etc. store items */
 const SLOTS_INV = 9*4;
@@ -826,6 +827,13 @@ let state = {
   using:   { ts_start: Date.now(), ts_end: Date.now() },
   jumping: { tick_start:        0, tick_end:        0, tick_grounded: 0 },
 };
+state.inv.items[0] = { id: ID_ITEM_T0_SPADE, amount: 1 };
+state.inv.items[1] = { id: ID_ITEM_T0_PICK, amount: 1 };
+state.inv.items[2] = { id: ID_ITEM_T0_AXE, amount: 1 };
+state.inv.items[3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
+state.inv.items[4] = { id: ID_BLOCK_SAPLING, amount: 10 };
+state.inv.items[5] = { id: ID_ITEM_COAL, amount: 20 };
+state.inv.items[6] = { id: ID_BLOCK_LOG, amount: 20 };
 
 const modulo = (n, d) => ((n % d) + d) % d;
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -838,6 +846,7 @@ const map_chunk_add = (x, y, z) => {
   const chunk_key = c_x + ',' + c_z;
 
   state.chunks[chunk_key] = {
+    chunk_key,
     genned: false,
     dirty: true,
     x: c_x*MAP_SIZE,
@@ -878,12 +887,6 @@ const map_set  = (x, y, z, v) => {
     chunk.dirty = 1;
 };
 
-state.inv.items[1+0] = { id: ID_ITEM_T0_SPADE, amount: 1 };
-state.inv.items[1+1] = { id: ID_ITEM_T0_PICK, amount: 1 };
-state.inv.items[1+2] = { id: ID_ITEM_T0_AXE, amount: 1 };
-state.inv.items[1+3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
-state.inv.items[1+4] = { id: ID_BLOCK_SAPLING, amount: 10 };
-state.inv.items[1+5] = { id: ID_BLOCK_GRASS, amount: 20 };
 function state_drop(i, amt) {
   const itms = state.inv.items;
   if (itms[i] != 0) {
@@ -1003,19 +1006,42 @@ function chunk_gen(c_x, c_y, c_z) {
       for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
 
         if (chunk_get(t_x, t_y, t_z) == ID_BLOCK_STONE) {
-          const min_height = 0;
-          const max_height = 20;
-          const height_range = max_height - min_height;
-          const t = 1 - Math.abs(0.5 - inv_lerp(min_height, max_height, t_y));
-          if (Math.random() < t*30/(MAP_SIZE*MAP_SIZE*height_range)) {
-            let vein_size = Math.ceil(3 + 4*Math.random());
-            const v = [t_x, t_y, t_z];
-            for (let i = 0; i < vein_size; i++) {
-              v[Math.floor(Math.random() * 3)] += (Math.random() < 0.5) ? -1 : 1;
+          {
+            const min_height = 0;
+            const max_height = 20;
+            const height_range = max_height - min_height;
+            const t = 1 - Math.abs(0.5 - inv_lerp(min_height, max_height, t_y));
+            const per_chunk_avg = 25;
+            const freq = per_chunk_avg/(MAP_SIZE*MAP_SIZE*height_range);
+            if (Math.random() < t*freq) {
+              let vein_size = Math.ceil(3 + 3*Math.random() + Math.random()*Math.random());
+              const v = [t_x, t_y, t_z];
+              for (let i = 0; i < vein_size; i++) {
+                v[Math.floor(Math.random() * 3)] += (Math.random() < 0.5) ? -1 : 1;
 
-              if (chunk == map_chunk(c_x + v[0], c_y + v[1], c_z + v[2]))
-                if (chunk_get(v[0], v[1], v[2]) == ID_BLOCK_STONE)
-                  chunk_set(v[0], v[1], v[2], ID_BLOCK_ORE_T2);
+                if (chunk == map_chunk(c_x + v[0], c_y + v[1], c_z + v[2]))
+                  if (chunk_get(v[0], v[1], v[2]) == ID_BLOCK_STONE)
+                    chunk_set(v[0], v[1], v[2], ID_BLOCK_ORE_T2);
+              }
+            }
+          }
+          {
+            const min_height = 10;
+            const max_height = 30;
+            const height_range = max_height - min_height;
+            const t = 1 - Math.abs(0.5 - inv_lerp(min_height, max_height, t_y));
+            const per_chunk_avg = 45;
+            const freq = per_chunk_avg/(MAP_SIZE*MAP_SIZE*height_range);
+            if (Math.random() < t*freq) {
+              let vein_size = Math.ceil(5 + 4*Math.random());
+              const v = [t_x, t_y, t_z];
+              for (let i = 0; i < vein_size; i++) {
+                v[Math.floor(Math.random() * 3)] += (Math.random() < 0.5) ? -1 : 1;
+
+                if (chunk == map_chunk(c_x + v[0], c_y + v[1], c_z + v[2]))
+                  if (chunk_get(v[0], v[1], v[2]) == ID_BLOCK_STONE)
+                    chunk_set(v[0], v[1], v[2], ID_BLOCK_ORE_COAL);
+              }
             }
           }
         }
@@ -1028,7 +1054,7 @@ function chunk_gen(c_x, c_y, c_z) {
     let t_z = 1+i;
     chunk_set(t_x, t_y, t_z, ID_BLOCK_WATER);
   }
-  
+
   for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
     for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
       let t_y = MAX_HEIGHT-1;
@@ -1039,11 +1065,30 @@ function chunk_gen(c_x, c_y, c_z) {
             chunk_set(t_x, t_y, t_z, ID_BLOCK_GRASS);
           break;
         }
-        chunk_light_src_set(t_x, t_y, t_z, MAX_LIGHT);
+        chunk_light_src_set(t_x, t_y, t_z, LIGHT_SRC_SUN);
         t_y--;
       }
     }
-  // place_tree(c_x + 10, c_y + 31, c_z + 3);
+}
+
+function chunk_growth(c_x, c_y, c_z) {
+  const chunk_light_src_set = (x, y, z, val) => map_light_src_set(c_x + x, c_y + y, c_z + z, val);
+  const chunk_set = (x, y, z, val) => map_set(c_x + x, c_y + y, c_z + z, val);
+  const chunk_get = (x, y, z     ) => map_get(c_x + x, c_y + y, c_z + z     );
+
+  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
+    for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
+      let t_y = MAX_HEIGHT-1;
+      while (t_y > 0) {
+        const block_id = chunk_get(t_x, t_y, t_z);
+        if (VOXEL_PERFECT[block_id]) {
+          if (Math.random() < 0.01)
+            place_tree(t_x + c_x, t_y, t_z + c_z);
+          break;
+        }
+        t_y--;
+      }
+    }
 }
 
 /* used for player & particle vs. world collision */
@@ -1069,6 +1114,7 @@ function pin_to_empty(ent) {
     const   delta = new_pos[i] - pos[i];
     if (block == ID_BLOCK_NONE)    hard = 0;
     if (block == ID_BLOCK_SAPLING) hard = 0;
+    if (block == ID_BLOCK_TORCH  ) hard = 0;
     if (block == ID_BLOCK_FLOWER0) hard = 0;
     if (block == ID_BLOCK_FLOWER1) hard = 0;
     if (block == ID_BLOCK_FLOWER2) hard = 0;
@@ -1349,8 +1395,9 @@ window.onkeydown = e => {
       const chunk = state.chunks[chunk_key];
 
       const map = chunk.map.reduce((a, x) => a + String.fromCharCode(x), '');
+      const light_src = chunk.light_src.reduce((a, x) => a + String.fromCharCode(x), '');
 
-      chunks[chunk_key] = { ...chunk, geo: undefined, map };
+      chunks[chunk_key] = { ...chunk, geo: undefined, light: undefined, map, light_src };
       // const b4 = JSON.stringify(chunk);
       // shrink_stat(b4, JSON.stringify(chunks[chunk_key]));
     }
@@ -1368,8 +1415,11 @@ window.onkeydown = e => {
     for (const chunk_key in state.chunks) {
       const chunk = state.chunks[chunk_key]; 
       chunk.map = chunk.map.split('').map(x => x.charCodeAt(0));
+      chunk.light_src = chunk.light_src.split('').map(x => x.charCodeAt(0));
+      chunk.light = new Uint8Array(MAP_SIZE*MAP_SIZE*MAX_HEIGHT);
       chunk.dirty = 1;
     }
+    light_recalc();
     e.preventDefault();
   }
 
@@ -1704,13 +1754,16 @@ function tick_light_src(chunk, __x, __y, __z) {
   const chunk_index = map_index(__x, __y, __z);
   if (VOXEL_PERFECT[chunk.map[chunk_index]]) return;
 
-  let light = chunk.light_src[chunk_index];
+  let light = 0;
   if (__y == (MAX_HEIGHT-1))
-    light = MAX_LIGHT;
+    light = LIGHT_SRC_SUN;
+  else if (chunk.map[chunk_index] == ID_BLOCK_TORCH)
+    light = LIGHT_SRC_TORCH;
   else {
     const above_i = map_index(__x, __y+1, __z);
     const above_light = VOXEL_PERFECT[chunk.map[above_i]] ? 0 : chunk.light_src[above_i];
-    light = above_light;
+    if (above_light == LIGHT_SRC_SUN)
+      light = above_light;
   }
 
   if (chunk.light_src[chunk_index] != light) {
@@ -1855,10 +1908,12 @@ function tick() {
 
               let would_cook_out = undefined;
               if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_COBBLE) would_cook_out = ID_BLOCK_STONE;
+              if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_LOG   ) would_cook_out = ID_ITEM_COAL;
               if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_ORE_T2) would_cook_out = ID_ITEM_T2_INGOT;
 
               let would_burn_for = undefined;
               if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_LOG    ) would_burn_for = 1.0;
+              if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_COAL   ) would_burn_for = 3.0;
               if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_WOOD   ) would_burn_for = 0.5;
               if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_SAPLING) would_burn_for = 0.1;
               would_burn_for = Math.floor(SEC_IN_TICKS*would_burn_for);
@@ -2068,12 +2123,14 @@ function tick() {
       state.pos[2] += state.delta[2]*0.1;
     }
 
-    if (0) {
+    if (1) {
       const temp = { pos: [...state.pos], last_pos: [...state.last_pos] };
-      temp.pos[1] += 1.8;
-      console.log(pin_to_empty(temp));
-      state.pos[0] += temp.pos[0];
-      state.pos[2] += temp.pos[2];
+      temp.pos     [1] += 1.8;
+      temp.last_pos[1] += 1.8;
+      pin_to_empty(temp);
+
+      state.pos[0] = temp.pos[0];
+      state.pos[2] = temp.pos[2];
     }
 
     let hit = pin_to_empty(state)
@@ -2400,6 +2457,7 @@ const {
       opts.mat = mat;
     }
 
+    if (block_id == ID_BLOCK_TORCH  ) opts.model = models.x;
     if (block_id == ID_BLOCK_FLOWER0) opts.model = models.x;
     if (block_id == ID_BLOCK_FLOWER1) opts.model = models.x;
     if (block_id == ID_BLOCK_FLOWER2) opts.model = models.x, opts.biomed = 1;
@@ -2504,18 +2562,23 @@ function mining() {
 
         const mined = map_get(p[0], p[1], p[2]);
         let out = mined;
+        let amount = 1;
         if (mined == ID_BLOCK_FLOWER2) out = ID_BLOCK_NONE;
         if (mined == ID_BLOCK_LEAVES ) out = ID_BLOCK_NONE;
         if (mined == ID_BLOCK_GRASS  ) out = ID_BLOCK_DIRT;
         if (mined == ID_BLOCK_STONE  ) out = ID_BLOCK_COBBLE;
-        if (mined == ID_BLOCK_ORE_T2 && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
-        if (mined == ID_BLOCK_STONE  && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
-        if (mined == ID_BLOCK_COBBLE && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
+        if (mined == ID_BLOCK_ORE_T2   && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
+        if (mined == ID_BLOCK_ORE_COAL && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
+        if (mined == ID_BLOCK_STONE    && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
+        if (mined == ID_BLOCK_COBBLE   && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
+
+        if (mined == ID_BLOCK_ORE_COAL && held_id == ID_ITEM_T0_PICK)
+          out = ID_ITEM_COAL, amount += Math.floor(1.25*Math.random());
 
         const vel = [Math.cos(Date.now() * 0.017)*0.05,
                      0,
                      Math.sin(Date.now() * 0.017)*0.05];
-        if (out) state.items.push({ vel, pos: add3(p, [0.5, 0.2, 0.5]), id: out, amount: 1 });
+        if (out) state.items.push({ vel, pos: add3(p, [0.5, 0.2, 0.5]), id: out, amount });
         map_set(p[0], p[1], p[2], ID_BLOCK_NONE);
       } while(false);
     }
@@ -2539,16 +2602,19 @@ function mining() {
 
       let mine_time = 2500;
       if (block_id == ID_BLOCK_LEAVES ) mine_time = 950;
+      if (block_id == ID_BLOCK_TORCH  ) mine_time = 350;
       if (block_id == ID_BLOCK_FLOWER0) mine_time = 350;
       if (block_id == ID_BLOCK_FLOWER1) mine_time = 350;
       if (block_id == ID_BLOCK_FLOWER2) mine_time = 350;
       if (block_id == ID_BLOCK_SAPLING) mine_time = 350;
-      if (block_id == ID_BLOCK_STONE)    mine_time = 9000;
+      if (block_id == ID_BLOCK_STONE   ) mine_time = 9000;
       if (block_id == ID_BLOCK_ORE_T2  ) mine_time = 10000;
+      if (block_id == ID_BLOCK_ORE_COAL) mine_time = 10000;
       if (block_id == ID_BLOCK_FURNACE0) mine_time = 10000;
       if (block_id == ID_BLOCK_FURNACE1) mine_time = 10000;
       if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_STONE    ) mine_time =  950;
-      if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_ORE_T2   ) mine_time =  950;
+      if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_ORE_COAL ) mine_time =  950;
+      if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_ORE_T2   ) mine_time = 1450;
       if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_COBBLE   ) mine_time = 1000;
       if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_FURNACE0 ) mine_time = 2000;
       if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_FURNACE1 ) mine_time = 2000;
@@ -2603,18 +2669,11 @@ function geo_chunk(geo, chunk) {
         ? map_light(chunk.x+t[0], t[1], chunk.z+t[2])
         : MAX_LIGHT
     );
-    const block_global_lookup = () => (
-      (c == 1)
-        ? ID_BLOCK_NONE
-        : ((map_chunk(   chunk.x+t[0], t[1], chunk.z+t[2]) != undefined)
-            ?   map_get( chunk.x+t[0], t[1], chunk.z+t[2])
-            : ID_BLOCK_NONE)
-    );
 
     for (t[a] = 0; t[a] < max[a]; t[a]++)
       for (t[b] = 0; t[b] < max[b]; t[b]++) {
         t[c] = -1;
-        let _last = block_global_lookup();
+        let _last = ID_BLOCK_NONE;
         let _last_light = light_global_lookup();
 
         for (t[c] = 0; t[c] <= max[c]; t[c]++) {
@@ -2625,7 +2684,7 @@ function geo_chunk(geo, chunk) {
           _last_light = light;
 
           const last = _last;
-          const now = (t[c] == max[c]) ? block_global_lookup() : chunk.map[chunk_index];
+          const now = (t[c] == max[c]) ? ID_BLOCK_NONE : chunk.map[chunk_index];
           _last = now;
 
           if (VOXEL_PERFECT[last] == VOXEL_PERFECT[now]) continue;
@@ -2650,7 +2709,7 @@ function geo_chunk(geo, chunk) {
             const cleary = 0;
             const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
             geo.vrt_i += 1;
-            u8_cast[u8_i+0] = lerp(0.15, 1, ease_in_expo(darken))*255;
+            u8_cast[u8_i+0] = lerp(0.15, 1, ease_out_sine(darken))*255;
             u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
           }
 
@@ -2678,7 +2737,7 @@ function geo_chunk(geo, chunk) {
               const cleary = 0;
               const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
               geo.vrt_i += 1;
-              u8_cast[u8_i+0] = lerp(0.15, 1, ease_in_expo(darken))*255;
+              u8_cast[u8_i+0] = lerp(0.15, 1, ease_out_sine(darken))*255;
               u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
             }
 
@@ -2850,7 +2909,7 @@ function geo_fill(geo, gl, program_info, render_stage) {
                 }
 
                 const nbr = chunk.map[map_index(o_x, o_y, o_z)];
-                if (VOXEL_CLEAR[nbr])
+                if (!VOXEL_PERFECT[nbr])
                   empty_nbr = 1;
               }
               if (empty_nbr == 0) continue;
@@ -3325,6 +3384,26 @@ function geo_fill(geo, gl, program_info, render_stage) {
           ]
         },
         {
+          out: { id: ID_ITEM_STICK, amount: 4 },
+          pattern_w: 1,
+          pattern_h: 2,
+          ingredients: [ID_BLOCK_WOOD],
+          pattern: [
+            0,
+            0,
+          ]
+        },
+        {
+          out: { id: ID_BLOCK_TORCH, amount: 4 },
+          pattern_w: 1,
+          pattern_h: 2,
+          ingredients: [ID_ITEM_COAL, ID_ITEM_STICK],
+          pattern: [
+            0,
+            1,
+          ]
+        },
+        {
           out: { id: ID_BLOCK_STAIRS, amount: 4 },
           pattern_w: 3,
           pattern_h: 3,
@@ -3423,6 +3502,20 @@ function geo_fill(geo, gl, program_info, render_stage) {
       ui_item(mp[0]-8, mp[1]-8, state.inv.items[pickup_i]);
   }
 }
+
+function light_recalc() {
+  for (const chunk_key in state.chunks) {
+    const chunk = state.chunks[chunk_key];
+    chunk.light.set(chunk.light_src);
+    for (const i in chunk.light)
+      if (chunk.light[i])
+        chunk.light[i] = MAX_LIGHT;
+
+    const { x, z, light_src } = chunk;
+    light_worker.postMessage({ chunk: { key: chunk_key, x, z, light_src } });
+  }
+  light_worker.postMessage({ compute: 1 });
+}
 (async () => {
   const canvas = document.getElementById("p1");
   const gl = canvas.getContext("webgl", { antialias: false });
@@ -3438,17 +3531,19 @@ function geo_fill(geo, gl, program_info, render_stage) {
   chunk_gen(-16, 0, -16);
   chunk_gen(-16, 0,  16);
 
-  for (const chunk_key in state.chunks) {
-    const chunk = state.chunks[chunk_key];
-    chunk.light.set(chunk.light_src);
+  chunk_growth(-16, 0,   0);
+  chunk_growth( 16, 0,   0);
+  chunk_growth(  0, 0,   0);
+  chunk_growth(  0, 0, -16);
+  chunk_growth(  0, 0,  16);
 
-    const { x, z, light_src } = chunk;
-    light_worker.postMessage({ chunk: { key: chunk_key, x, z, light_src } });
-  }
-  light_worker.postMessage({ compute: 1 });
+  chunk_growth( 16, 0,  16);
+  chunk_growth( 16, 0, -16);
+  chunk_growth(-16, 0, -16);
+  chunk_growth(-16, 0,  16);
 
+  light_recalc();
   light_worker.onmessage = ({ data }) => {
-    console.log("received chunk from worker");
     state.chunks[data.chunk_key].light = data.light;
     state.chunks[data.chunk_key].dirty = 1;
   };

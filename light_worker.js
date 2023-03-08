@@ -33,8 +33,8 @@ function chunk_light_from_src(chunk, chunk_out) {
         if (map_light_src(t_x, t_y, t_z))
           light = MAX_LIGHT;
         else {
-          for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            let nbr_light = map_light(t_x+x, t_y, t_z+z);
+          for (const [x, y, z] of [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]]) {
+            let nbr_light = map_light(t_x+x, t_y+y, t_z+z);
             light = Math.max(light, nbr_light-1);
           }
         }
@@ -45,7 +45,8 @@ function chunk_light_from_src(chunk, chunk_out) {
 let n_computes = 0;
 
 const chunk_out = new Uint8Array(MAP_SIZE*MAP_SIZE*MAX_HEIGHT);
-onmessage = ({ data }) => {
+let invocation_i = 0;
+onmessage = async ({ data }) => {
   if (data.chunk) {
     state.chunks[data.chunk.key] = {
       x: data.chunk.x,
@@ -61,6 +62,7 @@ onmessage = ({ data }) => {
       chunk.light.fill(0);
     }
 
+    const my_invocation = ++invocation_i;
     for (let i = 0; i < MAX_LIGHT; i++) {
       for (const chunk_key in state.chunks) {
         const chunk = state.chunks[chunk_key];
@@ -68,6 +70,8 @@ onmessage = ({ data }) => {
         chunk_light_from_src(chunk, chunk_out);
         chunk.light.set(chunk_out);
       }
+      await new Promise(res => setTimeout(res));
+      if (invocation_i != my_invocation) return;
     }
 
     for (const chunk_key in state.chunks)
