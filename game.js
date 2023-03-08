@@ -1804,164 +1804,164 @@ function tick() {
   }
   state.tick++;
 
-  if ((state.tick % (SEC_IN_TICKS/2)) == 0)
-    for (const chunk_key in state.chunks) {
-      const chunk = state.chunks[chunk_key];
+  for (const chunk_key in state.chunks) {
+    const chunk = state.chunks[chunk_key];
 
-      for (let __x = 0; __x < MAP_SIZE; __x++) 
-        for (let __y = 0; __y < MAX_HEIGHT; __y++) 
-          for (let __z = 0; __z < MAP_SIZE; __z++) {
+    const __y = MAX_HEIGHT - 1 - (state.tick % MAX_HEIGHT);
 
-            const chunk_index = map_index(__x, __y, __z);
-            let block_id = chunk.map[chunk_index];
-            if (block_id == ID_BLOCK_NONE) continue;
+    for (let __x = 0; __x < MAP_SIZE; __x++) 
+      for (let __z = 0; __z < MAP_SIZE; __z++) {
 
-            const t_x = __x + chunk.x;
-            const t_y = __y;
-            const t_z = __z + chunk.z;
+        const chunk_index = map_index(__x, __y, __z);
+        let block_id = chunk.map[chunk_index];
+        if (block_id == ID_BLOCK_NONE) continue;
 
-            if (block_id == ID_BLOCK_WATER) {
-              map_data(t_x, t_y, t_z).height ??= 5;
-              const height = map_data(t_x, t_y, t_z).height;
-              const under = map_get(t_x, t_y-1, t_z) != ID_BLOCK_NONE &&
-                            map_get(t_x, t_y-1, t_z) != ID_BLOCK_WATER;
+        const t_x = __x + chunk.x;
+        const t_y = __y;
+        const t_z = __z + chunk.z;
 
-              if (height != 1 && under)
-                for (let i = 0; i < 4; i++) {
-                  const n_x = t_x + nbrs[i][0];
-                  const n_y = t_y;
-                  const n_z = t_z + nbrs[i][1];
-                  const nbr = map_get(n_x, n_y, n_z);
+        if (block_id == ID_BLOCK_WATER) {
+          map_data(t_x, t_y, t_z).height ??= 5;
+          const height = map_data(t_x, t_y, t_z).height;
+          const under = map_get(t_x, t_y-1, t_z) != ID_BLOCK_NONE &&
+                        map_get(t_x, t_y-1, t_z) != ID_BLOCK_WATER;
 
-                  let spread = false;
-                  if (nbr == ID_BLOCK_FLOWER0) spread = 1;
-                  if (nbr == ID_BLOCK_FLOWER1) spread = 1;
-                  if (nbr == ID_BLOCK_FLOWER2) spread = 1;
-                  if (nbr == ID_BLOCK_NONE   ) spread = 1;
+          if (height != 1 && under)
+            for (let i = 0; i < 4; i++) {
+              const n_x = t_x + nbrs[i][0];
+              const n_y = t_y;
+              const n_z = t_z + nbrs[i][1];
+              const nbr = map_get(n_x, n_y, n_z);
 
-                  if (spread) {
-                    pending_height_set.push([n_x, n_y, n_z, height-1]);
-                    pending_map_set.push([n_x, n_y, n_z, ID_BLOCK_WATER]);
-                  }
-                }
-              if (!under) {
-                pending_height_set.push([t_x, t_y-1, t_z, 5]);
-                pending_map_set.push([t_x, t_y-1, t_z, ID_BLOCK_WATER]);
+              let spread = false;
+              if (nbr == ID_BLOCK_FLOWER0) spread = 1;
+              if (nbr == ID_BLOCK_FLOWER1) spread = 1;
+              if (nbr == ID_BLOCK_FLOWER2) spread = 1;
+              if (nbr == ID_BLOCK_NONE   ) spread = 1;
+
+              if (spread) {
+                pending_height_set.push([n_x, n_y, n_z, height-1]);
+                pending_map_set.push([n_x, n_y, n_z, ID_BLOCK_WATER]);
               }
             }
-
-            if (block_id == ID_BLOCK_FLOWER0 ||
-                block_id == ID_BLOCK_FLOWER1 ||
-                block_id == ID_BLOCK_FLOWER2
-            ) {
-              const under = chunk.map[map_index(__x, __y-1, __z)];
-              if (!(under == ID_BLOCK_DIRT || under == ID_BLOCK_GRASS))
-                pending_map_set.push([t_x, t_y, t_z, ID_BLOCK_NONE]);
-            }
-
-            if (block_id == ID_BLOCK_GRASS && Math.random() < 0.01) {
-              const over = chunk.map[map_index(__x, __y+1, __z)];
-              if (VOXEL_PERFECT[over])
-                pending_map_set.push([t_x, t_y, t_z, ID_BLOCK_DIRT]);
-              else {
-                const w_x = t_x + Math.round(lerp(-1.5, 1.5, Math.random()));
-                const w_y = t_y;
-                const w_z = t_z + Math.round(lerp(-1.5, 1.5, Math.random()));
-                if (
-                  map_chunk(w_x, w_y, w_z) &&
-                  map_get(w_x, w_y, w_z) == ID_BLOCK_DIRT &&
-                  !VOXEL_PERFECT[map_get(w_x, w_y+1, w_z)]
-                )
-                  pending_map_set.push([w_x, w_y, w_z, ID_BLOCK_GRASS]);
-              }
-            }
-
-            if (block_id == ID_BLOCK_LEAVES) {
-              let decay = 1;
-              for (let o_x = -2; o_x <= 2; o_x++) 
-                for (let o_y = -2; o_y <= 2; o_y++) 
-                  for (let o_z = -2; o_z <= 2; o_z++) {
-                    if (!map_chunk(o_x + t_x, o_y + t_y, o_z + t_z)) continue;
-                    const nbr = map_get(o_x + t_x, o_y + t_y, o_z + t_z);
-                    if (nbr == ID_BLOCK_LOG) decay = 0;
-                  }
-
-              if (decay && (Math.random() < 0.1))
-                pending_map_set.push([t_x, t_y, t_z, ID_BLOCK_NONE]);
-            }
-
-            if (
-              block_id == ID_BLOCK_FURNACE0 ||
-              block_id == ID_BLOCK_FURNACE1
-            ) {
-              const md = map_data(t_x, t_y, t_z);
-              md.inv             ??= [...Array(3)].fill(0);
-              md.tick_burn_end   ??= state.tick-1;
-              md.tick_cook_end   ??= state.tick-1;
-              md.tick_burn_start ??= state.tick-1;
-              md.tick_cook_start ??= state.tick-1;
-              md.id_cook_out     ??= undefined;
-
-              const furnace_inv = md.inv;
-              let cooking = state.tick < md.tick_cook_end;
-              let burning = state.tick < md.tick_burn_end;
-
-              let would_cook_out = undefined;
-              if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_COBBLE) would_cook_out = ID_BLOCK_STONE;
-              if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_LOG   ) would_cook_out = ID_ITEM_COAL;
-              if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_ORE_T2) would_cook_out = ID_ITEM_T2_INGOT;
-
-              let would_burn_for = undefined;
-              if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_LOG    ) would_burn_for = 1.0;
-              if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_COAL   ) would_burn_for = 3.0;
-              if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_WOOD   ) would_burn_for = 0.5;
-              if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_SAPLING) would_burn_for = 0.1;
-              would_burn_for = Math.floor(SEC_IN_TICKS*would_burn_for);
-
-              if (state.tick == md.tick_cook_end) {
-                if (furnace_inv[FURNACE_INDEX_OUT] == 0)
-                  furnace_inv[FURNACE_INDEX_OUT] = { amount: 1, id: md.id_cook_out };
-                else
-                  furnace_inv[FURNACE_INDEX_OUT].amount++;
-              }
-
-              map_set(t_x, t_y, t_z, burning ? ID_BLOCK_FURNACE1 : ID_BLOCK_FURNACE0);
-
-              const out_slot_ready = (
-                furnace_inv[FURNACE_INDEX_OUT] == 0 ||
-                would_cook_out == md.id_cook_out
-              );
-
-              if (
-                !burning       &&
-                would_cook_out &&
-                would_burn_for &&
-                out_slot_ready
-              ) {
-                burning = 1;
-
-                furnace_inv[FURNACE_INDEX_FUEL].amount--;
-                if (furnace_inv[FURNACE_INDEX_FUEL].amount == 0)
-                  furnace_inv[FURNACE_INDEX_FUEL] = 0;
-
-                md.tick_burn_start = state.tick;
-                md.tick_burn_end   = state.tick + would_burn_for;
-              }
-
-              if (burning && !cooking && out_slot_ready && would_cook_out) {
-                cooking = 1;
-
-                furnace_inv[FURNACE_INDEX_COOK].amount--;
-                if (furnace_inv[FURNACE_INDEX_COOK].amount == 0)
-                  furnace_inv[FURNACE_INDEX_COOK] = 0;
-
-                md.id_cook_out = would_cook_out;
-                md.tick_cook_start = state.tick;
-                md.tick_cook_end   = state.tick + SEC_IN_TICKS;
-              }
-            }
+          if (!under) {
+            pending_height_set.push([t_x, t_y-1, t_z, 5]);
+            pending_map_set.push([t_x, t_y-1, t_z, ID_BLOCK_WATER]);
           }
-    }
+        }
+
+        if (block_id == ID_BLOCK_FLOWER0 ||
+            block_id == ID_BLOCK_FLOWER1 ||
+            block_id == ID_BLOCK_FLOWER2
+        ) {
+          const under = chunk.map[map_index(__x, __y-1, __z)];
+          if (!(under == ID_BLOCK_DIRT || under == ID_BLOCK_GRASS))
+            pending_map_set.push([t_x, t_y, t_z, ID_BLOCK_NONE]);
+        }
+
+        if (block_id == ID_BLOCK_GRASS && Math.random() < 0.04) {
+          const over = chunk.map[map_index(__x, __y+1, __z)];
+          if (VOXEL_PERFECT[over])
+            pending_map_set.push([t_x, t_y, t_z, ID_BLOCK_DIRT]);
+          else {
+            const w_x = t_x + Math.round(lerp(-1.5, 1.5, Math.random()));
+            const w_y = t_y;
+            const w_z = t_z + Math.round(lerp(-1.5, 1.5, Math.random()));
+            if (
+              map_chunk(w_x, w_y, w_z) &&
+              map_get(w_x, w_y, w_z) == ID_BLOCK_DIRT &&
+              !VOXEL_PERFECT[map_get(w_x, w_y+1, w_z)]
+            )
+              pending_map_set.push([w_x, w_y, w_z, ID_BLOCK_GRASS]);
+          }
+        }
+
+        if (block_id == ID_BLOCK_LEAVES) {
+          let decay = 1;
+          for (let o_x = -2; o_x <= 2; o_x++) 
+            for (let o_y = -2; o_y <= 2; o_y++) 
+              for (let o_z = -2; o_z <= 2; o_z++) {
+                if (!map_chunk(o_x + t_x, o_y + t_y, o_z + t_z)) continue;
+                const nbr = map_get(o_x + t_x, o_y + t_y, o_z + t_z);
+                if (nbr == ID_BLOCK_LOG) decay = 0;
+              }
+
+          if (decay && (Math.random() < 0.1))
+            pending_map_set.push([t_x, t_y, t_z, ID_BLOCK_NONE]);
+        }
+
+        if (
+          block_id == ID_BLOCK_FURNACE0 ||
+          block_id == ID_BLOCK_FURNACE1
+        ) {
+          const md = map_data(t_x, t_y, t_z);
+          md.inv             ??= [...Array(3)].fill(0);
+          md.tick_burn_end   ??= state.tick-1;
+          md.tick_cook_end   ??= state.tick-1;
+          md.tick_burn_start ??= state.tick-1;
+          md.tick_cook_start ??= state.tick-1;
+          md.id_cook_out     ??= undefined;
+
+          const furnace_inv = md.inv;
+          let cooking = state.tick < md.tick_cook_end;
+          let burning = state.tick < md.tick_burn_end;
+
+          let would_cook_out = undefined;
+          if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_COBBLE) would_cook_out = ID_BLOCK_STONE;
+          if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_LOG   ) would_cook_out = ID_ITEM_COAL;
+          if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_ORE_T2) would_cook_out = ID_ITEM_T2_INGOT;
+
+          let would_burn_for = undefined;
+          if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_LOG    ) would_burn_for = 1.0;
+          if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_COAL   ) would_burn_for = 3.0;
+          if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_WOOD   ) would_burn_for = 0.5;
+          if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_SAPLING) would_burn_for = 0.1;
+          would_burn_for = Math.floor(SEC_IN_TICKS*would_burn_for);
+
+          if (state.tick == md.tick_cook_end) {
+            if (furnace_inv[FURNACE_INDEX_OUT] == 0)
+              furnace_inv[FURNACE_INDEX_OUT] = { amount: 1, id: md.id_cook_out };
+            else
+              furnace_inv[FURNACE_INDEX_OUT].amount++;
+          }
+
+          map_set(t_x, t_y, t_z, burning ? ID_BLOCK_FURNACE1 : ID_BLOCK_FURNACE0);
+
+          const out_slot_ready = (
+            furnace_inv[FURNACE_INDEX_OUT] == 0 ||
+            would_cook_out == md.id_cook_out
+          );
+
+          if (
+            !burning       &&
+            would_cook_out &&
+            would_burn_for &&
+            out_slot_ready
+          ) {
+            burning = 1;
+
+            furnace_inv[FURNACE_INDEX_FUEL].amount--;
+            if (furnace_inv[FURNACE_INDEX_FUEL].amount == 0)
+              furnace_inv[FURNACE_INDEX_FUEL] = 0;
+
+            md.tick_burn_start = state.tick;
+            md.tick_burn_end   = state.tick + would_burn_for;
+          }
+
+          if (burning && !cooking && out_slot_ready && would_cook_out) {
+            cooking = 1;
+
+            furnace_inv[FURNACE_INDEX_COOK].amount--;
+            if (furnace_inv[FURNACE_INDEX_COOK].amount == 0)
+              furnace_inv[FURNACE_INDEX_COOK] = 0;
+
+            md.id_cook_out = would_cook_out;
+            md.tick_cook_start = state.tick;
+            md.tick_cook_end   = state.tick + SEC_IN_TICKS;
+          }
+        }
+      }
+  }
   pending_map_set.forEach(([x, y, z, v]) => map_set(x, y, z, v));
   pending_height_set.forEach(([x, y, z, v]) => map_data(x, y, z, v).height = v);
   pending_light_set.forEach(([x, y, z, v]) => {
