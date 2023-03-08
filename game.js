@@ -1753,11 +1753,16 @@ async function ss_sprite(gl) {
 
 function tick_light_src(chunk, __x, __y, __z) {
   const chunk_index = map_index(__x, __y, __z);
-  if (VOXEL_PERFECT[chunk.map[chunk_index]]) return;
+  if (VOXEL_PERFECT[chunk.map[chunk_index]] &&
+      chunk.map[chunk_index] != ID_BLOCK_FURNACE1 &&
+      chunk.map[chunk_index] != ID_BLOCK_FURNACE0
+  ) return;
 
   let light = 0;
   if (__y == (MAX_HEIGHT-1))
     light = LIGHT_SRC_SUN;
+  else if (chunk.map[chunk_index] == ID_BLOCK_FURNACE1)
+    light = LIGHT_SRC_TORCH;
   else if (chunk.map[chunk_index] == ID_BLOCK_TORCH)
     light = LIGHT_SRC_TORCH;
   else {
@@ -1919,18 +1924,19 @@ function tick() {
           if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_SAPLING) would_burn_for = 0.1;
           would_burn_for = Math.floor(SEC_IN_TICKS*would_burn_for);
 
-          if (state.tick == md.tick_cook_end) {
+          if (md.id_cook_out && md.tick_cook_end <= state.tick) {
             if (furnace_inv[FURNACE_INDEX_OUT] == 0)
               furnace_inv[FURNACE_INDEX_OUT] = { amount: 1, id: md.id_cook_out };
             else
               furnace_inv[FURNACE_INDEX_OUT].amount++;
+            md.id_cook_out = undefined;
           }
 
           map_set(t_x, t_y, t_z, burning ? ID_BLOCK_FURNACE1 : ID_BLOCK_FURNACE0);
 
           const out_slot_ready = (
             furnace_inv[FURNACE_INDEX_OUT] == 0 ||
-            would_cook_out == md.id_cook_out
+            would_cook_out == furnace_inv[FURNACE_INDEX_OUT].id
           );
 
           if (
@@ -3426,6 +3432,17 @@ function geo_fill(geo, gl, program_info, render_stage) {
             1,1,1,
           ]
         },
+        {
+          out: { id: ID_BLOCK_STAIRS, amount: 4 },
+          pattern_w: 3,
+          pattern_h: 3,
+          ingredients: [ID_BLOCK_NONE, ID_BLOCK_WOOD],
+          pattern: [
+            0,0,1,
+            0,1,1,
+            1,1,1,
+          ]
+        },
       ];
 
       let out = 0;
@@ -3479,9 +3496,9 @@ function geo_fill(geo, gl, program_info, render_stage) {
         itms[scratch_i++] = furnace_inv[i];
 
       {
-        slot( 58, 107, host_inv_i + FURNACE_INDEX_FUEL);
-        slot( 58, 142, host_inv_i + FURNACE_INDEX_COOK);
-        slot(116, 125, host_inv_i + FURNACE_INDEX_OUT );
+        slot( 58,  97, host_inv_i + FURNACE_INDEX_FUEL);
+        slot( 58, 132, host_inv_i + FURNACE_INDEX_COOK);
+        slot(116, 115, host_inv_i + FURNACE_INDEX_OUT );
         let burn_t = inv_lerp(md.tick_burn_start, md.tick_burn_end, state.tick);
         let cook_t = inv_lerp(md.tick_cook_start, md.tick_cook_end, state.tick);
         burn_t = Math.max(0, Math.min(1, burn_t)); if (state.tick > md.tick_burn_end) burn_t = 0;
@@ -3492,14 +3509,14 @@ function geo_fill(geo, gl, program_info, render_stage) {
 
         {
           const opts = { z, tex_size_x: 2*cook_t, tex_size_y: 1 }
-          geo_ui_quad(geo, view_proj, 79, 124, 32*cook_t, 16, arrow, opts);
+          geo_ui_quad(geo, view_proj, 79, btm_pad+114, 32*cook_t, 16, arrow, opts);
         }
 
         {
           const below = SS_COLUMNS + flame;
           const size_x = 15;
           const opts = { z, tex_size_x: size_x/16, tex_size_y: -burn_t };
-          geo_ui_quad(geo, view_proj, 59, 124 + 16*burn_t, size_x, 16*-burn_t, below, opts);
+          geo_ui_quad(geo, view_proj, 59, btm_pad+114 + 16*burn_t, size_x, 16*-burn_t, below, opts);
         }
       }
 
