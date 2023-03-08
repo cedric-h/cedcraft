@@ -939,12 +939,13 @@ function chunk_gen(c_x, c_y, c_z) {
   const chunk = map_chunk(c_x, c_y, c_z) ?? map_chunk_add(c_x, c_y, c_z);
   chunk.light_src.fill(0);
 
-  for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    const nc_x = c_x + x*16;
-    const nc_z = c_z + z*16;
-    if (map_chunk(nc_x, 0, nc_z) == undefined)
-      map_chunk_add(nc_x, 0, nc_z);
-  }
+  for (let x = -1; x <= 1; x++)
+    for (let z = -1; z <= 1; z++) {
+      const nc_x = c_x + x*16;
+      const nc_z = c_z + z*16;
+      if (map_chunk(nc_x, 0, nc_z) == undefined)
+        map_chunk_add(nc_x, 0, nc_z);
+    }
 
   const cave = [...Array(MAP_SIZE*MAX_HEIGHT*MAP_SIZE)].fill(0);
   const dirt_height = [...Array(MAP_SIZE*MAP_SIZE)].fill(0);
@@ -1082,7 +1083,7 @@ function chunk_growth(c_x, c_y, c_z) {
       while (t_y > 0) {
         const block_id = chunk_get(t_x, t_y, t_z);
         if (VOXEL_PERFECT[block_id]) {
-          if (Math.random() < 0.01)
+          if (block_id == ID_BLOCK_GRASS && Math.random() < 0.01)
             place_tree(t_x + c_x, t_y, t_z + c_z);
           break;
         }
@@ -1913,7 +1914,7 @@ function tick() {
 
           let would_burn_for = undefined;
           if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_LOG    ) would_burn_for = 1.0;
-          if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_COAL   ) would_burn_for = 3.0;
+          if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_ITEM_COAL    ) would_burn_for = 3.0;
           if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_WOOD   ) would_burn_for = 0.5;
           if (furnace_inv[FURNACE_INDEX_FUEL].id == ID_BLOCK_SAPLING) would_burn_for = 0.1;
           would_burn_for = Math.floor(SEC_IN_TICKS*would_burn_for);
@@ -3391,6 +3392,17 @@ function geo_fill(geo, gl, program_info, render_stage) {
           pattern: [
             0,
             0,
+          ]
+        },
+        {
+          out: { id: ID_BLOCK_FURNACE0, amount: 1 },
+          pattern_w: 3,
+          pattern_h: 3,
+          ingredients: [ID_BLOCK_NONE, ID_BLOCK_COBBLE],
+          pattern: [
+            1,1,1,
+            1,0,1,
+            1,1,1,
           ]
         },
         {
