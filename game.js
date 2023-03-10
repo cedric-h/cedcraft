@@ -693,6 +693,17 @@ const ID_ITEM_T0_SPADE  = _id++;
 const ID_ITEM_T0_PICK   = _id++;
 const ID_ITEM_T0_AXE    = _id++;
 
+/* stack 'em up BABY */
+const ITEM_STACK_SIZE = [...Array(_id)].fill(65);
+ITEM_STACK_SIZE[ID_ITEM_T0_SPADE ] = 1;
+ITEM_STACK_SIZE[ID_ITEM_T0_PICK  ] = 1;
+ITEM_STACK_SIZE[ID_ITEM_T0_AXE   ] = 1;
+
+const ITEM_STOCK_DURABILITY = [...Array(_id)];
+ITEM_STOCK_DURABILITY[ID_ITEM_T0_SPADE] = 59;
+ITEM_STOCK_DURABILITY[ID_ITEM_T0_PICK ] = 59;
+ITEM_STOCK_DURABILITY[ID_ITEM_T0_AXE  ] = 59;
+
 /* "perfect" voxels are completely opaque and fill completely */
 const VOXEL_PERFECT = [...Array(_id)].fill(0);
 VOXEL_PERFECT[ID_BLOCK_DIRT    ] = 1;
@@ -827,13 +838,13 @@ let state = {
   using:   { ts_start: Date.now(), ts_end: Date.now() },
   jumping: { tick_start:        0, tick_end:        0, tick_grounded: 0 },
 };
-state.inv.items[0] = { id: ID_ITEM_T0_SPADE, amount: 1 };
-state.inv.items[1] = { id: ID_ITEM_T0_PICK, amount: 1 };
-state.inv.items[2] = { id: ID_ITEM_T0_AXE, amount: 1 };
+state.inv.items[0] = { id: ID_ITEM_T0_SPADE, amount: 1  };
+state.inv.items[1] = { id: ID_ITEM_T0_PICK , amount: 1  };
+state.inv.items[2] = { id: ID_ITEM_T0_AXE  , amount: 1  };
 state.inv.items[3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
 state.inv.items[4] = { id: ID_BLOCK_SAPLING, amount: 10 };
-state.inv.items[5] = { id: ID_ITEM_COAL, amount: 20 };
-state.inv.items[6] = { id: ID_BLOCK_LOG, amount: 20 };
+state.inv.items[5] = { id: ID_ITEM_T0_PICK , amount: 1 };
+state.inv.items[6] = { id: ID_ITEM_T0_PICK , amount: 1 };
 
 const modulo = (n, d) => ((n % d) + d) % d;
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -1746,6 +1757,16 @@ async function ss_sprite(gl) {
     ss_ctx.globalAlpha = 0.2;
     ss_ctx.fillStyle = "white";
     ss_ctx.fillRect(u, v, 16, 16);
+    ss_ctx.globalAlpha = 1.0;
+  }
+
+  for (let i = 0; i < 16; i++) {
+    const tex_o = SS_COLUMNS*11 + 23;
+    const u =           (tex_o % SS_COLUMNS) / SS_COLUMNS * SPRITESHEET_SIZE;
+    const v = Math.floor(tex_o / SS_COLUMNS) / SS_COLUMNS * SPRITESHEET_SIZE;
+    const hue = (i - 1)/15 * 120;
+    ss_ctx.fillStyle = (i == 0) ? 'black' : `hsl(${hue}, 90%, 60%)`;
+    ss_ctx.fillRect(u + i, v, 1, i ? i : 16);
   }
 
   gl_upload_image(gl, spritesheet, 0);
@@ -1998,18 +2019,22 @@ function tick() {
     if (mag3(sub3(item.pos, state.pos)) < 1.5) {
 
       /* find place for item in inventory */
-      (() => {
-        for (const i in state.inv.items)
-          if (state.inv.items[i].id == item.id) {
-            state.inv.items[i].amount += item.amount;
-            return;
-          }
-        for (const i in state.inv.items)
-          if (!state.inv.items[i]) {
-            state.inv.items[i] = item;
-            return;
-          }
-      })();
+        for (let j = 0; j < item.amount; j++)
+          (() => {
+            for (const i in state.inv.items)
+              if (
+                state.inv.items[i].id == item.id &&
+                state.inv.items[i].amount < ITEM_STACK_SIZE[item.id]
+              ) {
+                state.inv.items[i].amount++;
+                return;
+              }
+            for (const i in state.inv.items)
+              if (!state.inv.items[i]) {
+                state.inv.items[i] = { id: item.id, amount: 1 };
+                return;
+              }
+          })();
 
       return false;
     }
@@ -2565,7 +2590,8 @@ function mining() {
       do {
         const p = state.mining.block_coord;
 
-        const held_id = state.inv.items[state.inv.held_i].id;
+        const held_itm = state.inv.items[state.inv.held_i];
+        const held_id = held_itm.id;
 
         const mined = map_get(p[0], p[1], p[2]);
         let out = mined;
@@ -2581,6 +2607,13 @@ function mining() {
 
         if (mined == ID_BLOCK_ORE_COAL && held_id == ID_ITEM_T0_PICK)
           out = ID_ITEM_COAL, amount += Math.floor(1.25*Math.random());
+        
+        if (ITEM_STOCK_DURABILITY[held_id] != undefined) {
+          held_itm.durability ??= ITEM_STOCK_DURABILITY[held_id];
+          held_itm.durability--;
+          if (held_itm.durability == 0)
+            state.inv.items[state.inv.held_i] = 0;
+        }
 
         const vel = [Math.cos(Date.now() * 0.017)*0.05,
                      0,
@@ -3112,6 +3145,22 @@ function geo_fill(geo, gl, program_info, render_stage) {
 
     if (itm.amount > 1)
       ui_str(""+itm.amount, x, y, 8, { z: -1.0 });
+
+    if (itm.durability != undefined) {
+      const z = -1.0;
+      const         bar = SS_COLUMNS*11 + 23;
+      const translucent = SS_COLUMNS*11 + 24;
+      const opts = { z, tex_size_x: 1/16, tex_size_y: 1/16 }
+      geo_ui_quad(geo, view_proj, x+2, y+2, 13, 1, bar, opts);
+      geo_ui_quad(geo, view_proj, x+2, y+1, 13, 1, bar, opts);
+
+      const t = itm.durability / ITEM_STOCK_DURABILITY[itm.id];
+      const bar_len = Math.ceil(12 * t);
+      const bar_uv = bar + (1 + Math.ceil(14 * t))/16;
+      geo_ui_quad(geo, view_proj, x+2, y+2, bar_len, 1, bar_uv     , opts);
+      geo_ui_quad(geo, view_proj, x+2, y+2,      12, 1, translucent, opts);
+    }
+
   }
 
   if (render_stage == 2 && state.screen == SCREEN_WORLD) {
@@ -3202,13 +3251,13 @@ function geo_fill(geo, gl, program_info, render_stage) {
 
     const slot = (x, y, inv_i) => {
       const itm = state.inv.items[inv_i];
-      const tex_o = SS_COLUMNS*11 + 24;
+      const translucent = SS_COLUMNS*11 + 24;
 
       y += btm_pad;
 
       if (mp[0] > x && mp[0] < (x+16) &&
           mp[1] > y && mp[1] < (y+16)  ) {
-        geo_ui_quad(geo, view_proj, x, y, 16, 16, tex_o, { z });
+        geo_ui_quad(geo, view_proj, x, y, 16, 16, translucent, { z });
 
         const itms = state.inv.items;
 
@@ -3221,17 +3270,31 @@ function geo_fill(geo, gl, program_info, render_stage) {
           for (let i = SLOTS_INV-1; i >= 0; i--) {
             if (i == dst_i) continue;
 
-            if (itms[i] && itms[i].id == inv_id) {
-              itms[dst_i].amount += itms[i].amount;
-              itms[i] = 0;
+            while (
+              itms[i] &&
+              itms[i].id == inv_id &&
+              itms[dst_i].amount < ITEM_STACK_SIZE[inv_id]
+            ) {
+              itms[dst_i].amount++;
+              itms[i].amount--;
+              if (itms[i].amount == 0) {
+                itms[i] = 0;
+                break;
+              }
             }
           }
         }
         else if (state.mouseclick) {
           if (inv_id == pickup_id && inv_id != 0) {
             /* combine! */
-            itms[inv_i].amount += itms[pickup_i].amount;
-            itms[pickup_i] = 0;
+            while (itms[inv_i].amount < ITEM_STACK_SIZE[inv_id]) {
+              itms[inv_i].amount++;
+              itms[pickup_i].amount--;
+              if (itms[pickup_i].amount == 0) {
+                itms[pickup_i] = 0;
+                break;
+              }
+            }
           } else {
             /* swap! */
             const tmp = itms[inv_i];
@@ -3277,18 +3340,17 @@ function geo_fill(geo, gl, program_info, render_stage) {
       y += btm_pad;
 
       const itms = state.inv.items;
-      const tex_o = SS_COLUMNS*11 + 24;
+      const translucent = SS_COLUMNS*11 + 24;
 
       if (mp[0] > x && mp[0] < (x+16) &&
           mp[1] > y && mp[1] < (y+16)  ) {
-        geo_ui_quad(geo, view_proj, x, y, 16, 16, tex_o, { z });
+        geo_ui_quad(geo, view_proj, x, y, 16, 16, translucent, { z });
 
         if (state.mouseclick) {
           const inv_id    = itms[inv_i   ] && itms[inv_i   ].id;
           const pickup_id = itms[pickup_i] && itms[pickup_i].id;
 
           if ((inv_id == pickup_id && inv_id != 0) || itms[pickup_i] == 0) {
-            /* combine! */
             if (itms[pickup_i] == 0)
               itms[pickup_i] = itms[inv_i];
             else
