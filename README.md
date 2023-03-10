@@ -1,6 +1,13 @@
+
+saving (all)
+loading (all)
+light source sim (local)
+render (local)
+
+-----------------
 [ ] grow wheat
 [ ] shared world
-[ ] add stone tools
+[x] add stone tools
 [ ] add iron tools
 [ ] chat
 [ ] chest

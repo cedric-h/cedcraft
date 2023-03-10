@@ -692,17 +692,26 @@ const ID_ITEM_T2_INGOT  = _id++;
 const ID_ITEM_T0_SPADE  = _id++;
 const ID_ITEM_T0_PICK   = _id++;
 const ID_ITEM_T0_AXE    = _id++;
+const ID_ITEM_T1_SPADE  = _id++;
+const ID_ITEM_T1_PICK   = _id++;
+const ID_ITEM_T1_AXE    = _id++;
 
 /* stack 'em up BABY */
 const ITEM_STACK_SIZE = [...Array(_id)].fill(65);
 ITEM_STACK_SIZE[ID_ITEM_T0_SPADE ] = 1;
 ITEM_STACK_SIZE[ID_ITEM_T0_PICK  ] = 1;
 ITEM_STACK_SIZE[ID_ITEM_T0_AXE   ] = 1;
+ITEM_STACK_SIZE[ID_ITEM_T1_SPADE ] = 1;
+ITEM_STACK_SIZE[ID_ITEM_T1_PICK  ] = 1;
+ITEM_STACK_SIZE[ID_ITEM_T1_AXE   ] = 1;
 
 const ITEM_STOCK_DURABILITY = [...Array(_id)];
 ITEM_STOCK_DURABILITY[ID_ITEM_T0_SPADE] = 59;
 ITEM_STOCK_DURABILITY[ID_ITEM_T0_PICK ] = 59;
 ITEM_STOCK_DURABILITY[ID_ITEM_T0_AXE  ] = 59;
+ITEM_STOCK_DURABILITY[ID_ITEM_T1_SPADE] = 131;
+ITEM_STOCK_DURABILITY[ID_ITEM_T1_PICK ] = 131;
+ITEM_STOCK_DURABILITY[ID_ITEM_T1_AXE  ] = 131;
 
 /* "perfect" voxels are completely opaque and fill completely */
 const VOXEL_PERFECT = [...Array(_id)].fill(0);
@@ -747,6 +756,9 @@ function id_to_tex_num(block_id) {
   if (block_id == ID_ITEM_T0_SPADE  ) tex_offset = SS_COLUMNS*5 + 16;
   if (block_id == ID_ITEM_T0_PICK   ) tex_offset = SS_COLUMNS*6 + 16;
   if (block_id == ID_ITEM_T0_AXE    ) tex_offset = SS_COLUMNS*7 + 16;
+  if (block_id == ID_ITEM_T1_SPADE  ) tex_offset = SS_COLUMNS*5 + 16+1;
+  if (block_id == ID_ITEM_T1_PICK   ) tex_offset = SS_COLUMNS*6 + 16+1;
+  if (block_id == ID_ITEM_T1_AXE    ) tex_offset = SS_COLUMNS*7 + 16+1;
   if (block_id == ID_BLOCK_WOOD     ) tex_offset = all(4);
   if (block_id == ID_BLOCK_TABLE    ) tex_offset = xyz(SS_COLUMNS*3 + 11,
                                                        SS_COLUMNS*2 + 11,
@@ -838,13 +850,13 @@ let state = {
   using:   { ts_start: Date.now(), ts_end: Date.now() },
   jumping: { tick_start:        0, tick_end:        0, tick_grounded: 0 },
 };
-state.inv.items[0] = { id: ID_ITEM_T0_SPADE, amount: 1  };
-state.inv.items[1] = { id: ID_ITEM_T0_PICK , amount: 1  };
-state.inv.items[2] = { id: ID_ITEM_T0_AXE  , amount: 1  };
+state.inv.items[0] = { id: ID_ITEM_T1_SPADE, amount: 1  };
+state.inv.items[1] = { id: ID_ITEM_T1_PICK , amount: 1  };
+state.inv.items[2] = { id: ID_ITEM_T1_AXE  , amount: 1  };
 state.inv.items[3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
 state.inv.items[4] = { id: ID_BLOCK_SAPLING, amount: 10 };
-state.inv.items[5] = { id: ID_ITEM_T0_PICK , amount: 1 };
-state.inv.items[6] = { id: ID_ITEM_T0_PICK , amount: 1 };
+state.inv.items[5] = { id: ID_ITEM_T1_PICK , amount: 1 };
+state.inv.items[6] = { id: ID_ITEM_T1_PICK , amount: 1 };
 
 const modulo = (n, d) => ((n % d) + d) % d;
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -2600,12 +2612,14 @@ function mining() {
         if (mined == ID_BLOCK_LEAVES ) out = ID_BLOCK_NONE;
         if (mined == ID_BLOCK_GRASS  ) out = ID_BLOCK_DIRT;
         if (mined == ID_BLOCK_STONE  ) out = ID_BLOCK_COBBLE;
-        if (mined == ID_BLOCK_ORE_T2   && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
-        if (mined == ID_BLOCK_ORE_COAL && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
-        if (mined == ID_BLOCK_STONE    && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
-        if (mined == ID_BLOCK_COBBLE   && held_id != ID_ITEM_T0_PICK) out = ID_BLOCK_NONE;
+        const holds_pick = held_id == ID_ITEM_T0_PICK ||
+                           held_id == ID_ITEM_T1_PICK;
+        if (mined == ID_BLOCK_ORE_T2   && !holds_pick) out = ID_BLOCK_NONE;
+        if (mined == ID_BLOCK_ORE_COAL && !holds_pick) out = ID_BLOCK_NONE;
+        if (mined == ID_BLOCK_STONE    && !holds_pick) out = ID_BLOCK_NONE;
+        if (mined == ID_BLOCK_COBBLE   && !holds_pick) out = ID_BLOCK_NONE;
 
-        if (mined == ID_BLOCK_ORE_COAL && held_id == ID_ITEM_T0_PICK)
+        if (mined == ID_BLOCK_ORE_COAL && holds_pick)
           out = ID_ITEM_COAL, amount += Math.floor(1.25*Math.random());
         
         if (ITEM_STOCK_DURABILITY[held_id] != undefined) {
@@ -2652,19 +2666,33 @@ function mining() {
       if (block_id == ID_BLOCK_ORE_COAL) mine_time = 10000;
       if (block_id == ID_BLOCK_FURNACE0) mine_time = 10000;
       if (block_id == ID_BLOCK_FURNACE1) mine_time = 10000;
-      if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_STONE    ) mine_time =  950;
-      if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_ORE_COAL ) mine_time =  950;
-      if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_ORE_T2   ) mine_time = 1450;
-      if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_COBBLE   ) mine_time = 1000;
-      if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_FURNACE0 ) mine_time = 2000;
-      if (held_id == ID_ITEM_T0_PICK  && block_id == ID_BLOCK_FURNACE1 ) mine_time = 2000;
-      if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_DIRT     ) mine_time =  750;
-      if (held_id == ID_ITEM_T0_SPADE && block_id == ID_BLOCK_GRASS    ) mine_time =  800;
-      if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LOG      ) mine_time =  850;
-      if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_LEAVES   ) mine_time =  750;
-      if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_WOOD     ) mine_time =  650;
-      if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_TABLE    ) mine_time =  650;
-      if (held_id == ID_ITEM_T0_AXE   && block_id == ID_BLOCK_STAIRS   ) mine_time =  650;
+      const holds_spade = held_id == ID_ITEM_T0_SPADE ||
+                          held_id == ID_ITEM_T1_SPADE;
+      const holds_pick = held_id == ID_ITEM_T0_PICK ||
+                         held_id == ID_ITEM_T1_PICK;
+      const holds_axe = held_id == ID_ITEM_T0_AXE ||
+                        held_id == ID_ITEM_T1_AXE;
+      const time_mult = { 
+        [ID_ITEM_T0_SPADE]: 1.2,
+        [ID_ITEM_T0_PICK]: 1.2,
+        [ID_ITEM_T0_AXE]: 1.2,
+        [ID_ITEM_T1_SPADE]: 0.9,
+        [ID_ITEM_T1_PICK]: 0.9,
+        [ID_ITEM_T1_AXE]: 0.9,
+      };
+      if (holds_pick  && block_id == ID_BLOCK_STONE    ) mine_time =  950*time_mult[held_id];
+      if (holds_pick  && block_id == ID_BLOCK_ORE_COAL ) mine_time =  950*time_mult[held_id];
+      if (holds_pick  && block_id == ID_BLOCK_ORE_T2   ) mine_time = 1450*time_mult[held_id];
+      if (holds_pick  && block_id == ID_BLOCK_COBBLE   ) mine_time = 1000*time_mult[held_id];
+      if (holds_pick  && block_id == ID_BLOCK_FURNACE0 ) mine_time = 2000*time_mult[held_id];
+      if (holds_pick  && block_id == ID_BLOCK_FURNACE1 ) mine_time = 2000*time_mult[held_id];
+      if (holds_spade && block_id == ID_BLOCK_DIRT     ) mine_time =  750*time_mult[held_id];
+      if (holds_spade && block_id == ID_BLOCK_GRASS    ) mine_time =  800*time_mult[held_id];
+      if (holds_axe   && block_id == ID_BLOCK_LOG      ) mine_time =  850*time_mult[held_id];
+      if (holds_axe   && block_id == ID_BLOCK_LEAVES   ) mine_time =  750*time_mult[held_id];
+      if (holds_axe   && block_id == ID_BLOCK_WOOD     ) mine_time =  650*time_mult[held_id];
+      if (holds_axe   && block_id == ID_BLOCK_TABLE    ) mine_time =  650*time_mult[held_id];
+      if (holds_axe   && block_id == ID_BLOCK_STAIRS   ) mine_time =  650*time_mult[held_id];
 
       state.mining.ts_end = Date.now() + mine_time;
     }
@@ -3060,6 +3088,9 @@ function geo_fill(geo, gl, program_info, render_stage) {
     if (item_id == ID_ITEM_T0_SPADE) scale = 0.8, swing_rot = -90;
     if (item_id == ID_ITEM_T0_PICK ) scale = 0.8, swing_rot = -20;
     if (item_id == ID_ITEM_T0_AXE  ) scale = 0.8, swing_rot = -20;
+    if (item_id == ID_ITEM_T1_SPADE) scale = 0.8, swing_rot = -90;
+    if (item_id == ID_ITEM_T1_PICK ) scale = 0.8, swing_rot = -20;
+    if (item_id == ID_ITEM_T1_AXE  ) scale = 0.8, swing_rot = -20;
     if (item_id == 0               ) scale = 1.5, swing_rot = -45,
                                      pos = [aspect*0.75, -0.625, -1.85];
 
@@ -3313,8 +3344,9 @@ function geo_fill(geo, gl, program_info, render_stage) {
               itms[inv_i] = { id: itms[pickup_i].id, amount: 1 };
             }
             else if (inv_id == pickup_id && inv_id != undefined) {
-              itms[pickup_i].amount--;
-              itms[inv_i].amount++;
+              if (itms[inv_i].amount < ITEM_STACK_SIZE[inv_id])
+                itms[pickup_i].amount--,
+                itms[inv_i].amount++;
             }
           } else if (itms[inv_i].id && itms[inv_i].amount > 1) {
             itms[pickup_i] = { id: itm.id, amount: Math.floor(itm.amount/2) };
@@ -3350,7 +3382,13 @@ function geo_fill(geo, gl, program_info, render_stage) {
           const inv_id    = itms[inv_i   ] && itms[inv_i   ].id;
           const pickup_id = itms[pickup_i] && itms[pickup_i].id;
 
-          if ((inv_id == pickup_id && inv_id != 0) || itms[pickup_i] == 0) {
+          if (
+            (
+              inv_id == pickup_id &&
+              inv_id != 0 &&
+              (itms[inv_i].amount + itms[pickup_i].amount) < ITEM_STACK_SIZE[inv_id]
+            ) || itms[pickup_i] == 0
+          ) {
             if (itms[pickup_i] == 0)
               itms[pickup_i] = itms[inv_i];
             else
@@ -3471,6 +3509,72 @@ function geo_fill(geo, gl, program_info, render_stage) {
             1,1,1,
             1,0,1,
             1,1,1,
+          ]
+        },
+        {
+          out: { id: ID_ITEM_T0_SPADE, amount: 1 },
+          pattern_w: 1,
+          pattern_h: 3,
+          ingredients: [ID_ITEM_STICK, ID_BLOCK_WOOD],
+          pattern: [
+            1,
+            0,
+            0,
+          ]
+        },
+        {
+          out: { id: ID_ITEM_T0_PICK, amount: 1 },
+          pattern_w: 3,
+          pattern_h: 3,
+          ingredients: [ID_BLOCK_NONE, ID_ITEM_STICK, ID_BLOCK_WOOD],
+          pattern: [
+            2,2,2,
+            0,1,0,
+            0,1,0,
+          ]
+        },
+        {
+          out: { id: ID_ITEM_T0_AXE, amount: 1 },
+          pattern_w: 3,
+          pattern_h: 3,
+          ingredients: [ID_BLOCK_NONE, ID_ITEM_STICK, ID_BLOCK_WOOD],
+          pattern: [
+            2,2,0,
+            2,1,0,
+            0,1,0,
+          ]
+        },
+        {
+          out: { id: ID_ITEM_T1_SPADE, amount: 1 },
+          pattern_w: 1,
+          pattern_h: 3,
+          ingredients: [ID_ITEM_STICK, ID_BLOCK_COBBLE],
+          pattern: [
+            1,
+            0,
+            0,
+          ]
+        },
+        {
+          out: { id: ID_ITEM_T1_PICK, amount: 1 },
+          pattern_w: 3,
+          pattern_h: 3,
+          ingredients: [ID_BLOCK_NONE, ID_ITEM_STICK, ID_BLOCK_COBBLE],
+          pattern: [
+            2,2,2,
+            0,1,0,
+            0,1,0,
+          ]
+        },
+        {
+          out: { id: ID_ITEM_T1_AXE, amount: 1 },
+          pattern_w: 3,
+          pattern_h: 3,
+          ingredients: [ID_BLOCK_NONE, ID_ITEM_STICK, ID_BLOCK_COBBLE],
+          pattern: [
+            2,2,0,
+            2,1,0,
+            0,1,0,
           ]
         },
         {
