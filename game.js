@@ -795,6 +795,7 @@ const SCREEN_WORLD      = 0;
 const SCREEN_INV        = 1;
 const SCREEN_TABLE      = 2;
 const SCREEN_FURNACE    = 3;
+const SCREEN_CHAT       = 4;
 
 const LIGHT_SRC_NONE  = 0;
 const LIGHT_SRC_SUN   = 1;
@@ -818,6 +819,12 @@ let state = {
     items: [...Array(SLOTS_INV + SLOTS_SCRATCH)].fill(0),
     held_i: 0,
   },
+
+  chat: [
+    { msg: "WELCOME TO CEDCRAFT!", ts_in: Date.now() + 1600, ts_out: Date.now() + 10_600 },
+    { msg: "<tab> for inventory",  ts_in: Date.now() + 1700, ts_out: Date.now() + 10_700 },
+    { msg: "/help for cmd list",   ts_in: Date.now() + 1800, ts_out: undefined           }
+  ],
 
   chunks: {},
 
@@ -857,6 +864,66 @@ state.inv.items[3] = { id: ID_ITEM_BONEMEAL, amount: 10 };
 state.inv.items[4] = { id: ID_BLOCK_SAPLING, amount: 10 };
 state.inv.items[5] = { id: ID_ITEM_T1_PICK , amount: 1 };
 state.inv.items[6] = { id: ID_ITEM_T1_PICK , amount: 1 };
+
+const saves_db = (() => {
+  let _db;
+  const _db_load = new Promise(res => {
+    const req = indexedDB.open("cedcraft_data", 1);
+    req.onupgradeneeded = () => {
+      const db = event.target.result;
+      db.createObjectStore("saves", { keyPath: "save_name" });
+    };
+    req.onsuccess = e => res(e.target.result);
+  });
+  return async () => (_db ?? await _db_load);
+})();
+
+const saves_put = save_name => new Promise(async res => {
+  const chunks = {};
+  for (const chunk_key in state.chunks) {
+    const chunk = state.chunks[chunk_key];
+
+    chunks[chunk_key] = { ...chunk, geo: undefined, light: undefined };
+  }
+  (await saves_db())
+    .transaction(["saves"], "readwrite")
+    .objectStore("saves")
+    .put({ ...state, chunks, save_name })
+    .onsuccess = res;
+});
+
+const saves_load = save_name => new Promise(async res => {
+  (await saves_db())
+    .transaction(["saves"])
+    .objectStore("saves")
+    .get(save_name)
+    .onsuccess = e => {
+      if (e.target.result == undefined) {
+        res("no such save");
+        return;
+      }
+
+      const { keysdown } = state;
+      state = e.target.result;
+      state.keysdown = keysdown;
+
+      for (const chunk_key in state.chunks) {
+        const chunk = state.chunks[chunk_key]; 
+        chunk.light = new Uint8Array(MAP_SIZE*MAP_SIZE*MAX_HEIGHT);
+        chunk.dirty = 1;
+      }
+      light_recalc();
+      res();
+    };
+});
+
+const saves_list = () => new Promise(async res => {
+  (await saves_db())
+    .transaction(["saves"])
+    .objectStore("saves")
+    .getAllKeys()
+    .onsuccess = e => res(e.target.result);
+});
 
 const modulo = (n, d) => ((n % d) + d) % d;
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -1389,8 +1456,82 @@ document.onpointerlockchange = () => {
     state.cam = {...state.last_cam};
 };
 window.onkeydown = e => {
-  if (document.pointerLockElement)
+  if (document.pointerLockElement && state.screen != SCREEN_CHAT)
     state.keysdown[e.code] = 1;
+
+  if (state.screen == SCREEN_WORLD && e.code == 'Slash') {
+    document.exitPointerLock();
+    state.chat_input = "/";
+    state.screen = SCREEN_CHAT;
+    return;
+  }
+  if (state.screen == SCREEN_CHAT) {
+    if (e.code == 'Enter') {
+      const cmd = state.chat_input.split(' ');
+      const dflt = { ts_in: Date.now(), ts_out: Date.now()+8000 };
+      state.chat.push({ msg: state.chat_input, ...dflt });
+      dflt.ts_in += 1; /* sorting */
+      dflt.ts_out += 600;
+
+      if (cmd[0] == '/') {
+        state.chat.pop();
+      }
+
+      else if (cmd[0] == '/help') {
+        state.chat.push({ msg: ' "/load" - see list of saves', ...dflt });
+        state.chat.push({ msg: ' "/load [name]" - load given save', ...dflt });
+        state.chat.push({ msg: ' "/save [as]" - save with given name', ...dflt });
+      }
+
+      else if (cmd[0] == "/load") {
+        if (cmd.length == 1) {
+          state.chat.push({ msg: "listing saves", ...dflt });
+          saves_list(cmd[1]).then(saves => {
+            const dflt = { ts_in: Date.now()+2, ts_out: Date.now()+8600 };
+            for (const save_name of saves)
+              state.chat.push({ msg: " - " + save_name, ...dflt });
+          });
+        }
+        else if (cmd.length == 2) {
+          state.chat.push({ msg: `loading ${cmd[1]} ...`, ...dflt });
+          saves_load(cmd[1]).then(msg => {
+            const dflt = { ts_in: Date.now()+2, ts_out: Date.now()+8600 };
+            if (msg)
+              state.chat.push({ msg, ...dflt });
+            else
+              state.chat.push({ msg: "loaded " + cmd[1], ...dflt });
+          });
+        }
+        else if (cmd.length > 2) {
+          state.chat.push({ msg: "load takes one parameter (save name) or none", ...dflt });
+        }
+      }
+
+      else if (cmd[0] == '/save') {
+        if (cmd.length == 2) {
+          state.chat.push({ msg: `saving world as ${cmd[1]}...`, ...dflt });
+          saves_put(cmd[1]).then(() => {
+            const dflt = { ts_in: Date.now()+2, ts_out: Date.now()+8600 };
+            state.chat.push({ msg: "world saved as " + cmd[1], ...dflt });
+          });
+        }
+        else
+          state.chat.push({ msg: "save takes one parameter (save name)", ...dflt });
+      }
+
+      /* unknown */
+      else
+        state.chat.push({ msg: `unknown command "${cmd}"`, ...dflt });
+
+      document.getElementById("p1").requestPointerLock({ unadjustedMovement: true });
+      state.screen = SCREEN_WORLD;
+    } else if (e.key.length == 1) {
+      state.chat_input += e.key;
+      return;
+    } else if (e.key == "Backspace") {
+      state.chat_input = state.chat_input.substr(0, state.chat_input.length - 1);
+    }
+  }
 
   if (e.code == 'Tab') {
     e.preventDefault();
@@ -1409,42 +1550,12 @@ window.onkeydown = e => {
   }
 
   if (e.ctrlKey && e.key == 's') {
-    // const shrink_stat = (b4, after) => {
-    //   const ratio = after.length/b4.length;
-    //   const percentage = (ratio * 100).toFixed(2);
-    //   console.log(b4.length + ' vs ' + after.length, `(${percentage}%)`);
-    // }
-    const chunks = {};
-    for (const chunk_key in state.chunks) {
-      const chunk = state.chunks[chunk_key];
-
-      const map = chunk.map.reduce((a, x) => a + String.fromCharCode(x), '');
-      const light_src = chunk.light_src.reduce((a, x) => a + String.fromCharCode(x), '');
-
-      chunks[chunk_key] = { ...chunk, geo: undefined, light: undefined, map, light_src };
-      // const b4 = JSON.stringify(chunk);
-      // shrink_stat(b4, JSON.stringify(chunks[chunk_key]));
-    }
-
-    const out = JSON.stringify({ ...state, chunks });
-    // shrink_stat(JSON.stringify(state), out);
-    console.log({ out });
-    window.localStorage.setItem("state", out);
+    saves_put("cedtopia");
     e.preventDefault();
   }
   if (e.ctrlKey && e.key == 'd') {
-    const { keysdown } = state;
-    state = JSON.parse(window.localStorage.getItem("state"));
-    state.keysdown = keysdown;
-    for (const chunk_key in state.chunks) {
-      const chunk = state.chunks[chunk_key]; 
-      chunk.map = chunk.map.split('').map(x => x.charCodeAt(0));
-      chunk.light_src = chunk.light_src.split('').map(x => x.charCodeAt(0));
-      chunk.light = new Uint8Array(MAP_SIZE*MAP_SIZE*MAX_HEIGHT);
-      chunk.dirty = 1;
-    }
-    light_recalc();
     e.preventDefault();
+    saves_load("cedtopia");
   }
 
   if (e.code == "KeyQ") state_drop(state.inv.held_i, 1);
@@ -3134,6 +3245,10 @@ function geo_fill(geo, gl, program_info, render_stage) {
     );
   }
 
+  const text_width = (str, size) => {
+    const raw = str.split('').reduce((a, x) => a + letter_widths[x.charCodeAt(0)]/8, 0);
+    return size*raw;
+  };
   const ui_str = (str, x, y, size, opts={}) => {
     let cursor = 0;
     for (const i in str) {
@@ -3192,6 +3307,54 @@ function geo_fill(geo, gl, program_info, render_stage) {
       geo_ui_quad(geo, view_proj, x+2, y+2,      12, 1, translucent, opts);
     }
 
+  }
+
+  /* draw chat */
+  if (state.screen == SCREEN_WORLD && render_stage == 2) {
+    view_proj_center_x(ui_w);
+    let up_cursor = 0;
+    state.chat.sort((a, b) => b.ts_in - a.ts_in);
+    const max_width = Math.max(...state.chat.map(({ msg }) => text_width(msg, 4)));
+    for (const { msg, ts_in, ts_out } of state.chat) {
+      const in_t  = inv_lerp(ts_in ,  ts_in + 800, Date.now());
+      const out_t = ts_out ? inv_lerp(ts_out - 2500, ts_out, Date.now()) : -1;
+      if (out_t > 1 || in_t < 0) continue;
+
+      let t = 3;
+      if (in_t < 1 && in_t > 0) {
+        t = ease_out_expo(in_t);
+        t = pixel_round(lerp(-10, 3, t));
+      } else if (out_t < 1 && out_t > 0) {
+        t = ease_out_expo(out_t);
+        t = pixel_round(lerp(5, -max_width-4, t));
+      }
+      ui_str(msg,   t, 26+up_cursor, 4, { z: -1 });
+      up_cursor += 5;
+    }
+  }
+
+  if (state.screen == SCREEN_CHAT && render_stage == 2) {
+    view_proj_center_x(ui_w);
+    let up_cursor = 0;
+
+    const cursor = ((Date.now()/300%2) < 1) ? '|' : '';
+    ui_str(state.chat_input + cursor, 3, 26+up_cursor, 4, { z: -1 });
+    up_cursor += 5;
+
+    state.chat.sort((a, b) => b.ts_in - a.ts_in);
+    for (const chat of state.chat) {
+      chat.ts_out = Date.now() + 2500;
+      const { msg, ts_in, ts_out } = chat;
+      const in_t  = inv_lerp(ts_in ,  ts_in + 800, Date.now());
+
+      let t = 3;
+      if (in_t < 1 && in_t > 0) {
+        t = ease_out_expo(in_t);
+        t = pixel_round(lerp(-10, 3, t));
+      }
+      ui_str(msg,   t, 26+up_cursor, 4, { z: -1 });
+      up_cursor += 5;
+    }
   }
 
   if (render_stage == 2 && state.screen == SCREEN_WORLD) {
