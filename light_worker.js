@@ -16,6 +16,21 @@ const map_chunk = (x, y, z) => {
   const chunk_key = c_x + ',' + c_z;
   return state.chunks[chunk_key];
 }
+function *map_chunks_near(pos) {
+  const c_x = Math.floor(pos[0] / MAP_SIZE);
+  const c_z = Math.floor(pos[2] / MAP_SIZE);
+
+  yield (c_x-1) + ',' + (c_z+0);
+  yield (c_x+1) + ',' + (c_z+0);
+  yield (c_x+0) + ',' + (c_z+0); /* center */
+  yield (c_x+0) + ',' + (c_z-1);
+  yield (c_x+0) + ',' + (c_z+1);
+
+  yield (c_x+1) + ',' + (c_z+1); /* edge */
+  yield (c_x+1) + ',' + (c_z-1); /* edge */
+  yield (c_x-1) + ',' + (c_z-1); /* edge */
+  yield (c_x-1) + ',' + (c_z+1); /* edge */
+}
 const map_light_src     = (x, y, z   ) => map_chunk(x, y, z).light_src[map_index(x, y, z)];
 const map_light         = (x, y, z   ) => map_chunk(x, y, z).light    [map_index(x, y, z)];
 const map_light_set     = (x, y, z, v) => map_chunk(x, y, z).light    [map_index(x, y, z)] = v;
@@ -34,6 +49,7 @@ function chunk_light_from_src(chunk, chunk_out) {
           light = MAX_LIGHT;
         else {
           for (const [x, y, z] of [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]]) {
+            if (map_chunk(t_x+x, t_y+y, t_z+z) == undefined) continue;
             let nbr_light = map_light(t_x+x, t_y+y, t_z+z);
             light = Math.max(light, nbr_light-1);
           }
@@ -57,24 +73,26 @@ onmessage = async ({ data }) => {
   }
 
   if (data.compute) {
-    for (const chunk_key in state.chunks) {
+    for (const chunk_key of map_chunks_near(data.around)) {
       const chunk = state.chunks[chunk_key];
+      if (chunk == undefined) return;
       chunk.light.fill(0);
     }
 
     const my_invocation = ++invocation_i;
     for (let i = 0; i < MAX_LIGHT; i++) {
-      for (const chunk_key in state.chunks) {
+      for (const chunk_key of map_chunks_near(data.around)) {
         const chunk = state.chunks[chunk_key];
         chunk_out.fill(0);
         chunk_light_from_src(chunk, chunk_out);
         chunk.light.set(chunk_out);
       }
+      /* yield to event loop so fresh data = early quit */
       await new Promise(res => setTimeout(res));
       if (invocation_i != my_invocation) return;
     }
 
-    for (const chunk_key in state.chunks)
+    for (const chunk_key of map_chunks_near(data.around))
       postMessage({ chunk_key, light: state.chunks[chunk_key].light });
   }
 }

@@ -930,6 +930,21 @@ const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 const map_index = (x, y, z) => modulo(x, MAP_SIZE)    *MAP_SIZE*MAX_HEIGHT +
                                clamp(y, 0, MAX_HEIGHT)*MAP_SIZE +
                                modulo(z, MAP_SIZE);
+function *map_chunks_near(pos) {
+  const c_x = Math.floor(pos[0] / MAP_SIZE);
+  const c_z = Math.floor(pos[2] / MAP_SIZE);
+
+  yield (c_x-1) + ',' + (c_z+0);
+  yield (c_x+1) + ',' + (c_z+0);
+  yield (c_x+0) + ',' + (c_z+0); /* center */
+  yield (c_x+0) + ',' + (c_z-1);
+  yield (c_x+0) + ',' + (c_z+1);
+
+  yield (c_x+1) + ',' + (c_z+1); /* edge */
+  yield (c_x+1) + ',' + (c_z-1); /* edge */
+  yield (c_x-1) + ',' + (c_z-1); /* edge */
+  yield (c_x-1) + ',' + (c_z+1); /* edge */
+}
 const map_chunk_add = (x, y, z) => {
   const c_x = Math.floor(x / MAP_SIZE);
   const c_z = Math.floor(z / MAP_SIZE);
@@ -1025,9 +1040,11 @@ function place_tree(t_x, t_y, t_z) {
       }
 }
 
-function chunk_gen(c_x, c_y, c_z) {
-  const chunk = map_chunk(c_x, c_y, c_z) ?? map_chunk_add(c_x, c_y, c_z);
+function chunk_gen(chunk) {
   chunk.light_src.fill(0);
+  const c_x = chunk.x;
+  const c_y = 0;
+  const c_z = chunk.z;
 
   for (let x = -1; x <= 1; x++)
     for (let z = -1; z <= 1; z++) {
@@ -1059,7 +1076,6 @@ function chunk_gen(c_x, c_y, c_z) {
       }
     }
 
-  map_chunk(c_x, c_y, c_z).genned = 1;
   const chunk_light_src_set = (x, y, z, val) => map_light_src_set(c_x + x, c_y + y, c_z + z, val);
   const chunk_set = (x, y, z, val) => map_set(c_x + x, c_y + y, c_z + z, val);
   const chunk_get = (x, y, z     ) => map_get(c_x + x, c_y + y, c_z + z     );
@@ -1162,7 +1178,11 @@ function chunk_gen(c_x, c_y, c_z) {
     }
 }
 
-function chunk_growth(c_x, c_y, c_z) {
+function chunk_growth(chunk) {
+  const c_x = chunk.x;
+  const c_y = 0;
+  const c_z = chunk.z;
+
   const chunk_light_src_set = (x, y, z, val) => map_light_src_set(c_x + x, c_y + y, c_z + z, val);
   const chunk_set = (x, y, z, val) => map_set(c_x + x, c_y + y, c_z + z, val);
   const chunk_get = (x, y, z     ) => map_get(c_x + x, c_y + y, c_z + z     );
@@ -1931,8 +1951,9 @@ function tick() {
   const pending_height_set = []; 
   let pending_light_set = []; 
 
-  for (const chunk_key in state.chunks) {
+  for (const chunk_key of map_chunks_near(state.pos)) {
     const chunk = state.chunks[chunk_key];
+    if (chunk == undefined) continue;
 
     const __y = MAX_HEIGHT - 1 - (state.tick % MAX_HEIGHT);
 
@@ -1950,13 +1971,14 @@ function tick() {
 
       const { x, z, light_src } = chunk;
       light_worker.postMessage({ chunk: { key: chunk_key, x, z, light_src } });
-      light_worker.postMessage({ compute: 1 });
+      light_worker.postMessage({ compute: 1, around: state.pos });
     }
   }
   state.tick++;
 
-  for (const chunk_key in state.chunks) {
+  for (const chunk_key of map_chunks_near(state.pos)) {
     const chunk = state.chunks[chunk_key];
+    if (chunk == undefined) continue;
 
     const __y = MAX_HEIGHT - 1 - (state.tick % MAX_HEIGHT);
 
@@ -3040,8 +3062,9 @@ function geo_fill(geo, gl, program_info, render_stage) {
       map_set(p[0], p[1], p[2], ID_BLOCK_NONE);
     }
 
-    for (const chunk_key in state.chunks) {
+    for (const chunk_key of map_chunks_near(state.pos)) {
       const chunk = state.chunks[chunk_key];
+      if (chunk == undefined) continue;
 
       if (render_stage == 0) {
         if (!chunk.dirty || state.tick == window.last_chunk_tick) {
@@ -3865,7 +3888,7 @@ function geo_fill(geo, gl, program_info, render_stage) {
 }
 
 function light_recalc() {
-  for (const chunk_key in state.chunks) {
+  for (const chunk_key of map_chunks_near(state.pos)) {
     const chunk = state.chunks[chunk_key];
     chunk.light.set(chunk.light_src);
     for (const i in chunk.light)
@@ -3875,33 +3898,22 @@ function light_recalc() {
     const { x, z, light_src } = chunk;
     light_worker.postMessage({ chunk: { key: chunk_key, x, z, light_src } });
   }
-  light_worker.postMessage({ compute: 1 });
+  light_worker.postMessage({ compute: 1, around: state.pos });
 }
 (async () => {
   const canvas = document.getElementById("p1");
   const gl = canvas.getContext("webgl", { antialias: false });
 
-  chunk_gen(-16, 0,   0);
-  chunk_gen( 16, 0,   0);
-  chunk_gen(  0, 0,   0);
-  chunk_gen(  0, 0, -16);
-  chunk_gen(  0, 0,  16);
+  for (const chunk_key of map_chunks_near(state.pos)) {
+    const [c_x, c_z] = chunk_key.split(',');
+    const chunk = state.chunks[chunk_key] ?? map_chunk_add(c_x*MAP_SIZE, 0, c_z*MAP_SIZE);
+    chunk_gen(chunk);
+  }
 
-  chunk_gen( 16, 0,  16);
-  chunk_gen( 16, 0, -16);
-  chunk_gen(-16, 0, -16);
-  chunk_gen(-16, 0,  16);
-
-  chunk_growth(-16, 0,   0);
-  chunk_growth( 16, 0,   0);
-  chunk_growth(  0, 0,   0);
-  chunk_growth(  0, 0, -16);
-  chunk_growth(  0, 0,  16);
-
-  chunk_growth( 16, 0,  16);
-  chunk_growth( 16, 0, -16);
-  chunk_growth(-16, 0, -16);
-  chunk_growth(-16, 0,  16);
+  for (const chunk_key of map_chunks_near(state.pos)) {
+    chunk_growth(state.chunks[chunk_key]);
+    state.chunks[chunk_key].genned = 1;
+  }
 
   light_recalc();
   light_worker.onmessage = ({ data }) => {
@@ -3956,6 +3968,30 @@ function light_recalc() {
       tick();
     }
     mining();
+
+    /* gen more map on demand */
+    {
+      for (const chunk_key of map_chunks_near(state.pos)) {
+        let chunk = state.chunks[chunk_key]
+        if (chunk == undefined) {
+          const [c_x, c_z] = chunk_key.split(',');
+          chunk = map_chunk_add(c_x*MAP_SIZE, 0, c_z*MAP_SIZE);
+        }
+        if (!chunk.genned) chunk_gen(chunk);
+      }
+
+      let needs_light_recalc = 0;
+      for (const chunk_key of map_chunks_near(state.pos)) {
+        const chunk = state.chunks[chunk_key];
+        if (!chunk.genned) {
+          needs_light_recalc = 1;
+          chunk_growth(chunk);
+          chunk.genned = 1;
+        }
+      }
+
+      if (needs_light_recalc) light_recalc();
+    }
 
     /* spritesheet shower helper thingy */
     if (0) {
