@@ -698,6 +698,7 @@ const ID_ITEM_T1_AXE    = _id++;
 
 /* stack 'em up BABY */
 const ITEM_STACK_SIZE = [...Array(_id)].fill(65);
+ITEM_STACK_SIZE[ID_BLOCK_FURNACE0] = 1;
 ITEM_STACK_SIZE[ID_ITEM_T0_SPADE ] = 1;
 ITEM_STACK_SIZE[ID_ITEM_T0_PICK  ] = 1;
 ITEM_STACK_SIZE[ID_ITEM_T0_AXE   ] = 1;
@@ -821,7 +822,7 @@ let state = {
   },
 
   chat: [
-    { msg: "WELCOME TO CEDCRAFT!", ts_in: Date.now() + 1600, ts_out: Date.now() + 10_600 },
+    { msg: "CEDCRAFT version 0.0.1 \"ninja\"", ts_in: Date.now() + 1600, ts_out: Date.now() + 10_600 },
     { msg: "<tab> for inventory",  ts_in: Date.now() + 1700, ts_out: Date.now() + 10_700 },
     { msg: "/help for cmd list",   ts_in: Date.now() + 1800, ts_out: undefined           }
   ],
@@ -853,7 +854,7 @@ let state = {
   mousepos: { x: 0, y: 0 },
 
   /* ticks for physics, timestamps for animations */
-  mining:  { ts_start: Date.now(), ts_end: Date.now(), block_coord: undefined },
+  mining:  { ts_start: Date.now(), ts_end: Date.now(), block_coord: undefined, tool_inv_i: undefined },
   using:   { ts_start: Date.now(), ts_end: Date.now() },
   jumping: { tick_start:        0, tick_end:        0, tick_grounded: 0 },
 };
@@ -1622,7 +1623,31 @@ function cam_view_proj() {
     100
   );
   
-  const eye = cam_eye();
+  let eye = cam_eye();
+  /* don't let eye get too close to block */
+  {
+    const eye_p = [Math.floor(eye[0]),
+                   Math.floor(eye[1]),
+                   Math.floor(eye[2])];
+    const center = [eye_p[0] + 0.5,
+                    eye_p[1] + 0.5,
+                    eye_p[2] + 0.5];
+    const delta = sub3(eye, center);
+
+    for (let axis = 0; axis < 3; axis++) {
+      const dir = Math.sign(delta[axis]);
+      const p = [...eye_p];
+      p[axis] += dir;
+
+      let mag = Math.abs(delta[axis])
+      if (map_get(p[0], p[1], p[2]) != ID_BLOCK_NONE)
+        mag = Math.min(0.45, mag);
+      center[axis] += dir * mag;
+    }
+
+    eye = center;
+  }
+
   const view = mat4_create();
   mat4_target_to(view, eye, add3(cam_looking(), eye));
   mat4_invert(view, view);
@@ -1855,12 +1880,11 @@ async function ss_sprite(gl) {
 
     let width = 0;
     for (let x = 0; x < 8; x++) {
-      let hit = 0;
+      let hit = false;
       for (let y = 0; y < 8; y++) {
-        hit ||= +!!font_px[((ltr_y*8 + y)*128 + (ltr_x*8 + x))*4+3];
+        hit ||= !!font_px[((ltr_y*8 + y)*128 + (ltr_x*8 + x))*4+3];
       }
-      if (!hit) break;
-      width++;
+      if (hit) width = x+1;
     }
 
     // let out = '';
@@ -2067,17 +2091,22 @@ function tick() {
           block_id == ID_BLOCK_FURNACE0 ||
           block_id == ID_BLOCK_FURNACE1
         ) {
-          const md = map_data(t_x, t_y, t_z);
-          md.inv             ??= [...Array(3)].fill(0);
-          md.tick_burn_end   ??= state.tick-1;
-          md.tick_cook_end   ??= state.tick-1;
-          md.tick_burn_start ??= state.tick-1;
-          md.tick_cook_start ??= state.tick-1;
-          md.id_cook_out     ??= undefined;
+          const burn_look_ticks = SEC_IN_TICKS; 
+
+          map_data(t_x, t_y, t_z).furnace ??= {
+            inv:             [...Array(3)].fill(0),
+            tick_burn_end:   state.tick - burn_look_ticks,
+            tick_cook_end:   state.tick - burn_look_ticks,
+            tick_burn_start: state.tick - burn_look_ticks,
+            tick_cook_start: state.tick - burn_look_ticks,
+            id_cook_out:     undefined,
+          };
+          const md = map_data(t_x, t_y, t_z).furnace;
 
           const furnace_inv = md.inv;
           let cooking = state.tick < md.tick_cook_end;
           let burning = state.tick < md.tick_burn_end;
+          let burning_look = state.tick < (md.tick_burn_end + burn_look_ticks);
 
           let would_cook_out = undefined;
           if (furnace_inv[FURNACE_INDEX_COOK].id == ID_BLOCK_COBBLE) would_cook_out = ID_BLOCK_STONE;
@@ -2099,7 +2128,7 @@ function tick() {
             md.id_cook_out = undefined;
           }
 
-          map_set(t_x, t_y, t_z, burning ? ID_BLOCK_FURNACE1 : ID_BLOCK_FURNACE0);
+          map_set(t_x, t_y, t_z, burning_look ? ID_BLOCK_FURNACE1 : ID_BLOCK_FURNACE0);
 
           const out_slot_ready = (
             furnace_inv[FURNACE_INDEX_OUT] == 0 ||
@@ -2237,10 +2266,12 @@ function tick() {
     state.vel -= 0.35/SEC_IN_TICKS;
     state.pos[1] += state.vel;
 
-    if (state.jumping.grounded || jumping_off) {
+    {
+      const grounded = state.jumping.grounded || jumping_off;
       const fwd = cam_looking(); fwd[1] = 0; norm(fwd);
       const side = cross3(VEC3_UP, fwd);
 
+      /* 0..0.1 instead of 0..1 simply for legacy reasons */
       let delta = [0, 0, 0];
       let move = 0;
       if (state.keysdown['KeyW']) move = 1, delta = add3(delta, mul3_f( fwd,  0.1));
@@ -2248,26 +2279,39 @@ function tick() {
       if (state.keysdown['KeyA']) move = 1, delta = add3(delta, mul3_f(side,  0.1));
       if (state.keysdown['KeyD']) move = 1, delta = add3(delta, mul3_f(side, -0.1));
 
+      /* movement starts slow */
       let t = 0;
-      const elapsed = state.tick - state.tick_start_move - 1;
-      if (elapsed > 0) t = ease_out_circ(Math.min(1, elapsed / (0.1*SEC_IN_TICKS)));
+      let delta_t = 0;
+      if (!grounded) {
+        delta_t = 0.1;
 
-      if (!move) state.tick_start_move = state.tick;
+        t = 0.25;
+      } else {
+        delta_t = 0.05;
 
-      if (!move) {
-        let grounded_t = (state.tick - state.jumping.tick_grounded) / (0.1*SEC_IN_TICKS);
-        grounded_t = ease_out_circ(grounded_t);
-        if (grounded_t < 1)
-          delta = mul3_f(state.delta, 0.1*grounded_t);
+        const elapsed = state.tick - state.tick_start_move - 1;
+        if (elapsed > 0) t = ease_out_circ(Math.min(1, elapsed / (0.1*SEC_IN_TICKS)));
+
+        if (!move) state.tick_start_move = state.tick;
+
+        /* slower if you've just hit the ground */
+        if (!move) {
+          let grounded_t = (state.tick - state.jumping.tick_grounded) / (0.1*SEC_IN_TICKS);
+          grounded_t = ease_out_circ(grounded_t);
+          if (grounded_t < 1)
+            delta = mul3_f(state.delta, 0.1*grounded_t);
+        }
       }
+      state.pos[0] += state.delta[0]*delta_t;
+      state.pos[2] += state.delta[2]*delta_t;
 
       delta = mul3_f(delta, t);
       state.pos = add3(state.pos, delta);
-      state.delta = mul3_f(state.delta, 0.9);
-      state.delta = add3(state.delta, delta);
+      if (grounded) state.delta = mul3_f(state.delta, (grounded) ? 0.8 : 0.5);
+      if (grounded) state.delta = add3(state.delta, delta);
 
-      /* stairs hack (works good) */
-      for (let i = 0; i <= 2; i++) {
+      /* stairs hack (works goodish) */
+      if (grounded) for (let i = 0; i <= 2; i++) {
         const block = [Math.floor(state.pos[0]),
                        Math.floor(state.pos[1] + 0.01*i),
                        Math.floor(state.pos[2])];
@@ -2296,19 +2340,29 @@ function tick() {
         }
       }
 
-    } else {
-      state.pos[0] += state.delta[0]*0.1;
-      state.pos[2] += state.delta[2]*0.1;
     }
 
-    if (1) {
+    /* for not going through walls head-high */
+    for (let offset = 0.8; offset < 2; offset += 1.0) {
       const temp = { pos: [...state.pos], last_pos: [...state.last_pos] };
-      temp.pos     [1] += 1.8;
-      temp.last_pos[1] += 1.8;
+      temp.pos     [1] += offset;
+      temp.last_pos[1] += offset;
       pin_to_empty(temp);
 
       state.pos[0] = temp.pos[0];
       state.pos[2] = temp.pos[2];
+    }
+    /* y - no last pos (for bumping ya head) */
+    {
+      const offset = 1.8;
+      const temp = { pos: [...state.pos], last_pos: [...state.last_pos] };
+      temp.pos     [1] += offset;
+      pin_to_empty(temp);
+
+      state.pos[0] = temp.pos[0];
+      state.pos[2] = temp.pos[2];
+
+      state.pos[1] = temp.pos[1] - offset;
     }
 
     let hit = pin_to_empty(state)
@@ -2731,9 +2785,14 @@ function geo_sync(geo, gl) {
 }
 
 function mining() {
-  /* update mining (removing/changing block as necessary) */
   const cast = ray_to_map(cam_eye(), cam_looking());
-  if (cast.coord && cast.coord+'' == state.mining.block_coord+'') {
+
+  /* break block if tool & block are the same, otherwise reset mining */
+  if (
+    cast.coord &&
+    cast.coord+'' == state.mining.block_coord+'' &&
+    state.mining.tool_inv_i == state.inv.held_i
+  ) {
     if (state.mining.ts_end < Date.now()) {
       do {
         const p = state.mining.block_coord;
@@ -2744,10 +2803,11 @@ function mining() {
         const mined = map_get(p[0], p[1], p[2]);
         let out = mined;
         let amount = 1;
-        if (mined == ID_BLOCK_FLOWER2) out = ID_BLOCK_NONE;
-        if (mined == ID_BLOCK_LEAVES ) out = ID_BLOCK_NONE;
-        if (mined == ID_BLOCK_GRASS  ) out = ID_BLOCK_DIRT;
-        if (mined == ID_BLOCK_STONE  ) out = ID_BLOCK_COBBLE;
+        if (mined == ID_BLOCK_FLOWER2 ) out = ID_BLOCK_NONE;
+        if (mined == ID_BLOCK_LEAVES  ) out = ID_BLOCK_NONE;
+        if (mined == ID_BLOCK_GRASS   ) out = ID_BLOCK_DIRT;
+        if (mined == ID_BLOCK_FURNACE1) out = ID_BLOCK_FURNACE0;
+        if (mined == ID_BLOCK_STONE   ) out = ID_BLOCK_COBBLE;
         const holds_pick = held_id == ID_ITEM_T0_PICK ||
                            held_id == ID_ITEM_T1_PICK;
         if (mined == ID_BLOCK_ORE_T2   && !holds_pick) out = ID_BLOCK_NONE;
@@ -2770,11 +2830,25 @@ function mining() {
                      Math.sin(Date.now() * 0.017)*0.05];
         if (out) state.items.push({ vel, pos: add3(p, [0.5, 0.2, 0.5]), id: out, amount });
         map_set(p[0], p[1], p[2], ID_BLOCK_NONE);
+
+        if (mined == ID_BLOCK_FURNACE0) {
+          let scratch_i = state.inv.items.length - SLOTS_SCRATCH;
+          for (let i = 0; i < FURNACE_INDEX_COUNT; i++)
+            itms[scratch_i] = furnace_inv[i], state_drop(scratch_i);
+        }
+        for (const key in map_data(p[0], p[1], p[2]))
+          delete map_data(p[0], p[1], p[2])[key];
+
       } while(false);
     }
   } else {
-    state.mining = { block_coord: undefined, ts_start: Date.now(), ts_end: Date.now() };
+    state.mining = { tool_inv_i: undefined,
+                     block_coord: undefined,
+                     ts_start: Date.now(),
+                     ts_end: Date.now() };
   }
+
+  /* if the mosue is down and you're looking at something, begin mining */
   {
     const { block_coord, ts_end } = state.mining;
     if ((state.mousedown)                                 &&
@@ -2783,6 +2857,7 @@ function mining() {
         (cast.coord != undefined)
     ) {
       state.mining.block_coord = cast.coord;
+      state.mining.tool_inv_i = state.inv.held_i;
       state.mining.ts_start = Date.now();
 
       const held_id = state.inv.items[state.inv.held_i].id;
@@ -3245,6 +3320,8 @@ function geo_fill(geo, gl, program_info, render_stage) {
       t = ease_out_sine(t);
       swing_rot -= 40*t;
     }
+
+    if (!isFinite(swing_rot)) debugger;
 
     const mat = mat4_from_translation(mat4_create(), pos);
     mat4_mul(mat, mat, mat4_from_y_rotation(_scratch,        40 / 180 * Math.PI));
@@ -3831,15 +3908,16 @@ function geo_fill(geo, gl, program_info, render_stage) {
       itms[out_i] = 0;
     }
 
-    const md = 
+    const block_data = 
       map_chunk(state.screen_block_coord[0],
                 state.screen_block_coord[1],
                 state.screen_block_coord[2])
       ? map_data(state.screen_block_coord[0],
                  state.screen_block_coord[1],
                  state.screen_block_coord[2])
-      : 0
-    if (state.screen == SCREEN_FURNACE && md && md.inv) {
+      : 0;
+    if (state.screen == SCREEN_FURNACE && block_data && block_data.furnace) {
+      const md = block_data.furnace;
       const furnace_inv = md.inv;
 
       const itms = state.inv.items;
