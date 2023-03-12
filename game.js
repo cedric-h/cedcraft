@@ -1488,8 +1488,9 @@ window.onkeydown = e => {
           state.chat.push({ msg: "listing saves", ...dflt });
           saves_list(cmd[1]).then(saves => {
             const dflt = { ts_in: Date.now()+2, ts_out: Date.now()+8600 };
+            state.chat.push({ msg: `found ${saves.length} saves`, ...dflt });
             for (const save_name of saves)
-              state.chat.push({ msg: " - " + save_name, ...dflt });
+              state.chat.push({ msg: ` - "${save_name}"`, ...dflt });
           });
         }
         else if (cmd.length == 2) {
@@ -2475,12 +2476,14 @@ const {
       geo.cpu_position[geo.vrt_i++] = u * recip_GRID_SIZE;
       geo.cpu_position[geo.vrt_i++] = v * recip_GRID_SIZE;
 
-      const darken = opts.darken ?? (i >= dark_after_vert);
+      let darken = (1 - (opts.darken ?? (i >= dark_after_vert))*0.2)*255 
+      if (opts.world_light)
+        darken = lerp(0.15, 1, ease_out_sine(map_light(t_x, t_y, t_z) / MAX_LIGHT))*255;
       const biomed = ((opts.biomed && opts.biomed[face_i]) ?? opts.biomed) ?? 0;
       const cleary = opts.cleary ?? 0;
       const u8_i = Float32Array.BYTES_PER_ELEMENT * geo.vrt_i;
       geo.vrt_i += 1;
-      u8_cast[u8_i] = (1 - darken*0.2)*255;
+      u8_cast[u8_i] = darken;
       u8_cast[u8_i+1] = (biomed << 0) | (cleary << 1);
     }
 
@@ -3072,7 +3075,7 @@ function geo_fill(geo, gl, program_info, render_stage) {
                 ) continue;
 
               const block_data = chunk.data[index];
-              const opts = { block_data };
+              const opts = { block_data, world_light: 1 };
 
               let empty_nbr = 0;
               for (let i = 0; i < 6; i++) {
@@ -3121,7 +3124,7 @@ function geo_fill(geo, gl, program_info, render_stage) {
               if (block_id == 0 || VOXEL_RENDER_STAGE[block_id] != render_stage) continue;
 
               const block_data = chunk.data[index];
-              const opts = { block_data };
+              const opts = { block_data, world_light: 1 };
 
               const w_x = t_x + chunk.x;
               const w_y = t_y;
@@ -3141,12 +3144,12 @@ function geo_fill(geo, gl, program_info, render_stage) {
         const t_y = state.mining.block_coord[1];
         const t_z = state.mining.block_coord[2];
         if (t < 0.98) {
-          const opts = {};
+          const opts = { world_light: 1 };
           opts.block_data = map_data(t_x, t_y, t_z);
           geo_block(geo, t_x, t_y, t_z, mining_block_type, opts);
         }
         const stage = Math.floor(lerp(0, 9, t));
-        geo_block(geo, t_x, t_y, t_z, ID_BLOCK_BREAKING + stage);
+        geo_block(geo, t_x, t_y, t_z, ID_BLOCK_BREAKING + stage, { world_light: 1 });
       }
     }
 
