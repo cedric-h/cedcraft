@@ -42,13 +42,13 @@
  * [ ] add iron tools
  * [x] chat
  * [ ] chest
-  
+ *
  * [ ] biomes
  * [ ] AO
  * [ ] gen water
  * [ ] clear leaves
  * [ ] localize light sim cellular automata
-  
+ *
  * [ ] visualize player in inventory
  * [ ] armor
  * [x] gen chunks on-demand
