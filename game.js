@@ -1154,6 +1154,11 @@ function chunk_growth(chunk) {
   const chunk_set = (x, y, z, val) => map_set(c_x + x, c_y + y, c_z + z, val);
   const chunk_get = (x, y, z     ) => map_get(c_x + x, c_y + y, c_z + z     );
 
+  chunk.light.set(chunk.light_src);
+  for (const i in chunk.light)
+    if (chunk.light[i])
+      chunk.light[i] = MAX_LIGHT;
+
   for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
     for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
       let t_y = MAX_HEIGHT-1;
@@ -3936,11 +3941,6 @@ function geo_fill(geo, gl, program_info, render_stage) {
 function light_recalc() {
   for (const chunk_key of map_chunks_near(state.pos)) {
     const chunk = state.chunks[chunk_key];
-    chunk.light.set(chunk.light_src);
-    for (const i in chunk.light)
-      if (chunk.light[i])
-        chunk.light[i] = MAX_LIGHT;
-
     const { x, z, light_src } = chunk;
     light_worker.postMessage({ chunk: { key: chunk_key, x, z, light_src } });
   }
