@@ -30,11 +30,6 @@
  *  [x] Item break speeds
  *  [ ] Chest
 
-# DAY DREAM
- *  [ ] Grappling Hook
- *  [ ] World-in-a-Pot
- *  [ ] Pulleys
-
 # NEXT
  * [ ] grow wheat
  * [ ] shared world
@@ -53,3 +48,9 @@
  * [ ] armor
  * [x] gen chunks on-demand
  * [ ] visualize other players
+
+# DAY DREAM
+ *  [ ] Grappling Hook
+ *  [ ] World-in-a-Pot
+ *  [ ] Pulleys
+ *  [ ] Live-in NPCs
