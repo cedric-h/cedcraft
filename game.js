@@ -1,44 +1,6 @@
 "use strict";
 // vim: sw=2 ts=2 expandtab smartindent ft=javascript
 
-/* ENGINE
- *  [x] Camera
- *  [x] Skybox
- *  [ ] Ambient Occlusion
- *
- *  [x] 2D Physics
- *  [x] Jump
- *
- *  [ ] Splitscreen
- *  [ ] State Cache
- * 
- *  [ ] Networking
- *  [ ] Chat
- *
- * SANDBOX
- *  [x] Break
- *  [x] Place
- *  [x] Pick Up
- *
- *  [x] Hotbar
- *  [x] Numerals
- *
- *  [x] Tree
- *  [x] Sapling
- *
- *  [x] Inventory
- *  [x] Crafting Table
- *  [x] Furnace
- *
- *  [x] Item break speeds
- *  [ ] Chest
- *
- * DAY DREAM
- *  [ ] Grappling Hook
- *  [ ] World-in-a-Pot
- *  [ ] Pulleys
- */
-
 const log = x => (console.log(x), x);
 const VEC3_UP = [0, 1, 0];
 const VERT_FLOATS = 7;
@@ -729,6 +691,7 @@ VOXEL_PERFECT[ID_BLOCK_GRASS   ] = 1;
 // VOXEL_PERFECT[ID_BLOCK_LOG     ] = 1;
 VOXEL_PERFECT[ID_BLOCK_LEAVES  ] = 1; /* for now */
 
+/* marks textures as needing multiplication by biome color */
 const TEX_BIOMED = Array();
 TEX_BIOMED[id_to_tex_num(ID_BLOCK_GRASS  )[1]] = 1;
 TEX_BIOMED[id_to_tex_num(ID_BLOCK_FLOWER2)[0]] = 1;
@@ -874,7 +837,10 @@ const saves_db = (() => {
       const db = event.target.result;
       db.createObjectStore("saves", { keyPath: "save_name" });
     };
-    req.onsuccess = e => res(e.target.result);
+    req.onsuccess = e => {
+      _db = e.target.result;
+      res(e.target.result);
+    }
   });
   return async () => (_db ?? await _db_load);
 })();
@@ -1265,7 +1231,7 @@ function ray_to_map(ray_origin, ray_direction) {
     last_coord: [0, 0, 0],
   };
 
-  // calculate distances to axis boundries and direction of discrete DDA steps
+  // calculate distances to axis boundaries and direction of discrete DDA steps
   const map = [Math.floor(ray_origin[0]),
                Math.floor(ray_origin[1]),
                Math.floor(ray_origin[2]) ];
@@ -1918,6 +1884,7 @@ async function ss_sprite(gl) {
   ss_ctx.drawImage(    sky, 0    , h*2  ,     sky.width,     sky.height);
   ss_ctx.drawImage(    inv, w*2  , 0    , terrain.width, terrain.height);
 
+  /* generate translucent white hover-selector tex */
   {
     const tex_o = SS_COLUMNS*11 + 24;
     const u =           (tex_o % SS_COLUMNS) / SS_COLUMNS * SPRITESHEET_SIZE;
@@ -1928,6 +1895,7 @@ async function ss_sprite(gl) {
     ss_ctx.globalAlpha = 1.0;
   }
 
+  /* generate item durability bar texture */
   for (let i = 0; i < 16; i++) {
     const tex_o = SS_COLUMNS*11 + 23;
     const u =           (tex_o % SS_COLUMNS) / SS_COLUMNS * SPRITESHEET_SIZE;
@@ -2194,22 +2162,22 @@ function tick() {
     if (mag3(sub3(item.pos, state.pos)) < 1.5) {
 
       /* find place for item in inventory */
-        for (let j = 0; j < item.amount; j++)
-          (() => {
-            for (const i in state.inv.items)
-              if (
-                state.inv.items[i].id == item.id &&
-                state.inv.items[i].amount < ITEM_STACK_SIZE[item.id]
-              ) {
-                state.inv.items[i].amount++;
-                return;
-              }
-            for (const i in state.inv.items)
-              if (!state.inv.items[i]) {
-                state.inv.items[i] = { id: item.id, amount: 1 };
-                return;
-              }
-          })();
+      for (let j = 0; j < item.amount; j++)
+        (() => {
+          for (const i in state.inv.items)
+            if (
+              state.inv.items[i].id == item.id &&
+              state.inv.items[i].amount < ITEM_STACK_SIZE[item.id]
+            ) {
+              state.inv.items[i].amount++;
+              return;
+            }
+          for (const i in state.inv.items)
+            if (!state.inv.items[i]) {
+              state.inv.items[i] = { id: item.id, amount: 1 };
+              return;
+            }
+        })();
 
       return false;
     }
