@@ -1,5 +1,5 @@
 # NEXT
- * THIS WORLD
+### THIS WORLD
  * [x] gen chunks on-demand
  * [x] hills
  * [x] caves
@@ -10,14 +10,14 @@
  * [ ] gravel
  * [ ] sand
  * [ ] sand -> glass
- * HOUSEHOLD AFFAIRS
+### HOUSEHOLD AFFAIRS
  * [x] stairs
  * [ ] door
  * [ ] trapdoor
  * [ ] ladder
  * [ ] fences
  * [ ] stone brick
- * NATURE
+### NATURE
  * [x] grow tree
  * [x] grow flowers/tall grass
  * [x] grow grass
@@ -26,7 +26,7 @@
  * [ ] grow cocoa beans
  * [ ] grow sugar cane
  * [ ] grow melons/pumpkins
- * INDUSTRY
+### INDUSTRY
  * [x] crafting table
  * [x] furnace
  * [ ] chest
@@ -39,21 +39,21 @@
  * [ ] add diamond tools
  * [x] add wooden tools
  * [x] add stone tools
- * FRIENDS
+### FRIENDS
  * [x] save/load commands
  * [ ] "what recipes can i make?" command
  * [ ] chat
  * [ ] shared world
  * [ ] visualize other players
- * ROLEPLAYING
+### ROLEPLAYING
  * [ ] visualize player in inventory
  * [ ] armor
- * GRAPHICS
+### GRAPHICS
  * [ ] AO
  * [ ] sun
  * [ ] proper diffuse lighting
  * [ ] localize light sim cellular automata
- * MOBS
+### MOBS
  * [x] zombie model
  * [x] zombie animations
  * [x] zombie chase
