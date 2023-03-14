@@ -68,7 +68,7 @@ onmessage = async ({ data }) => {
   if (data.compute) {
     const my_invocation = ++invocation_i;
 
-    for (let range = 1; range <= 3; range++) {
+    for (let range = 0; range <= 3; range++) {
       for (const chunk_key of map_chunks_near(data.around, range)) {
         const chunk = state.chunks[chunk_key];
         if (chunk == undefined) return;

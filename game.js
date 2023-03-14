@@ -2572,11 +2572,12 @@ function geo_chunk(geo, chunk) {
     positions[3*3 + b] = 0;
     positions[3*3 + c] = 0;
 
-    const light_global_lookup = () => (
-      (map_chunk(   chunk.x+t[0], t[1], chunk.z+t[2]) != undefined)
-        ? map_light(chunk.x+t[0], t[1], chunk.z+t[2])
-        : MAX_LIGHT
-    );
+    const light_global_lookup = () => {
+      const lc = map_chunk(   chunk.x+t[0], t[1], chunk.z+t[2]);
+      if (lc == undefined)             return MAX_LIGHT;
+      if (lc.genned != CHUNK_GEN_DONE) return MAX_LIGHT;
+      return map_light(chunk.x+t[0], t[1], chunk.z+t[2]);
+    };
 
     for (t[a] = 0; t[a] < max[a]; t[a]++)
       for (t[b] = 0; t[b] < max[b]; t[b]++) {
@@ -3681,14 +3682,6 @@ function chunk_gen(chunk_key) {
   light_worker.onmessage = ({ data }) => {
     state.chunks[data.chunk_key].light = data.light;
     state.chunks[data.chunk_key].dirty = 1;
-
-    const c_x = Math.floor(pos[0] / MAP_SIZE);
-    const c_z = Math.floor(pos[2] / MAP_SIZE);
-    const rest = [[1, 1], [1, -1], [-1, -1], [-1, 1]];
-    for (const [o_x, o_z] of rest) {
-      const chunk = state.chunks[(c_x+o_x) + ',' + (c_z+o_z)];
-      if (chunk != undefined) chunk.dirty = 1;
-    }
   };
 
   await Promise.all(Object.values(firstgen).map(x => x.promise));
