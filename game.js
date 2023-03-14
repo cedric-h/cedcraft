@@ -21,185 +21,6 @@ function ease_in_expo(x) {
   return x === 0 ? 0 : Math.pow(2, 10 * x - 10);
 }
 
-function noise3(
-  x,      y,      z,
-  x_wrap, y_wrap, z_wrap,
-  seed
-) {
-  // not same permutation table as Perlin's reference to avoid copyright issues;
-  // Perlin's table can be found at http://mrl.nyu.edu/~perlin/noise/
-  // static unsigned char stb__perlin_randtab[512] =
-  const stb__perlin_randtab = [
-     23, 125, 161, 52, 103, 117, 70, 37, 247, 101, 203, 169, 124, 126, 44, 123,
-     152, 238, 145, 45, 171, 114, 253, 10, 192, 136, 4, 157, 249, 30, 35, 72,
-     175, 63, 77, 90, 181, 16, 96, 111, 133, 104, 75, 162, 93, 56, 66, 240,
-     8, 50, 84, 229, 49, 210, 173, 239, 141, 1, 87, 18, 2, 198, 143, 57,
-     225, 160, 58, 217, 168, 206, 245, 204, 199, 6, 73, 60, 20, 230, 211, 233,
-     94, 200, 88, 9, 74, 155, 33, 15, 219, 130, 226, 202, 83, 236, 42, 172,
-     165, 218, 55, 222, 46, 107, 98, 154, 109, 67, 196, 178, 127, 158, 13, 243,
-     65, 79, 166, 248, 25, 224, 115, 80, 68, 51, 184, 128, 232, 208, 151, 122,
-     26, 212, 105, 43, 179, 213, 235, 148, 146, 89, 14, 195, 28, 78, 112, 76,
-     250, 47, 24, 251, 140, 108, 186, 190, 228, 170, 183, 139, 39, 188, 244, 246,
-     132, 48, 119, 144, 180, 138, 134, 193, 82, 182, 120, 121, 86, 220, 209, 3,
-     91, 241, 149, 85, 205, 150, 113, 216, 31, 100, 41, 164, 177, 214, 153, 231,
-     38, 71, 185, 174, 97, 201, 29, 95, 7, 92, 54, 254, 191, 118, 34, 221,
-     131, 11, 163, 99, 234, 81, 227, 147, 156, 176, 17, 142, 69, 12, 110, 62,
-     27, 255, 0, 194, 59, 116, 242, 252, 19, 21, 187, 53, 207, 129, 64, 135,
-     61, 40, 167, 237, 102, 223, 106, 159, 197, 189, 215, 137, 36, 32, 22, 5,
-
-     // and a second copy so we don't need an extra mask or static initializer
-     23, 125, 161, 52, 103, 117, 70, 37, 247, 101, 203, 169, 124, 126, 44, 123,
-     152, 238, 145, 45, 171, 114, 253, 10, 192, 136, 4, 157, 249, 30, 35, 72,
-     175, 63, 77, 90, 181, 16, 96, 111, 133, 104, 75, 162, 93, 56, 66, 240,
-     8, 50, 84, 229, 49, 210, 173, 239, 141, 1, 87, 18, 2, 198, 143, 57,
-     225, 160, 58, 217, 168, 206, 245, 204, 199, 6, 73, 60, 20, 230, 211, 233,
-     94, 200, 88, 9, 74, 155, 33, 15, 219, 130, 226, 202, 83, 236, 42, 172,
-     165, 218, 55, 222, 46, 107, 98, 154, 109, 67, 196, 178, 127, 158, 13, 243,
-     65, 79, 166, 248, 25, 224, 115, 80, 68, 51, 184, 128, 232, 208, 151, 122,
-     26, 212, 105, 43, 179, 213, 235, 148, 146, 89, 14, 195, 28, 78, 112, 76,
-     250, 47, 24, 251, 140, 108, 186, 190, 228, 170, 183, 139, 39, 188, 244, 246,
-     132, 48, 119, 144, 180, 138, 134, 193, 82, 182, 120, 121, 86, 220, 209, 3,
-     91, 241, 149, 85, 205, 150, 113, 216, 31, 100, 41, 164, 177, 214, 153, 231,
-     38, 71, 185, 174, 97, 201, 29, 95, 7, 92, 54, 254, 191, 118, 34, 221,
-     131, 11, 163, 99, 234, 81, 227, 147, 156, 176, 17, 142, 69, 12, 110, 62,
-     27, 255, 0, 194, 59, 116, 242, 252, 19, 21, 187, 53, 207, 129, 64, 135,
-     61, 40, 167, 237, 102, 223, 106, 159, 197, 189, 215, 137, 36, 32, 22, 5,
-  ];
-
-
-  // perlin's gradient has 12 cases so some get used 1/16th of the time
-  // and some 2/16ths. We reduce bias by changing those fractions
-  // to 5/64ths and 6/64ths
-
-  // this array is designed to match the previous implementation
-  // of gradient hash: indices[stb__perlin_randtab[i]&63]
-  // static unsigned char stb__perlin_randtab_grad_idx[512] =
-  const stb__perlin_randtab_grad_idx = [
-      7, 9, 5, 0, 11, 1, 6, 9, 3, 9, 11, 1, 8, 10, 4, 7,
-      8, 6, 1, 5, 3, 10, 9, 10, 0, 8, 4, 1, 5, 2, 7, 8,
-      7, 11, 9, 10, 1, 0, 4, 7, 5, 0, 11, 6, 1, 4, 2, 8,
-      8, 10, 4, 9, 9, 2, 5, 7, 9, 1, 7, 2, 2, 6, 11, 5,
-      5, 4, 6, 9, 0, 1, 1, 0, 7, 6, 9, 8, 4, 10, 3, 1,
-      2, 8, 8, 9, 10, 11, 5, 11, 11, 2, 6, 10, 3, 4, 2, 4,
-      9, 10, 3, 2, 6, 3, 6, 10, 5, 3, 4, 10, 11, 2, 9, 11,
-      1, 11, 10, 4, 9, 4, 11, 0, 4, 11, 4, 0, 0, 0, 7, 6,
-      10, 4, 1, 3, 11, 5, 3, 4, 2, 9, 1, 3, 0, 1, 8, 0,
-      6, 7, 8, 7, 0, 4, 6, 10, 8, 2, 3, 11, 11, 8, 0, 2,
-      4, 8, 3, 0, 0, 10, 6, 1, 2, 2, 4, 5, 6, 0, 1, 3,
-      11, 9, 5, 5, 9, 6, 9, 8, 3, 8, 1, 8, 9, 6, 9, 11,
-      10, 7, 5, 6, 5, 9, 1, 3, 7, 0, 2, 10, 11, 2, 6, 1,
-      3, 11, 7, 7, 2, 1, 7, 3, 0, 8, 1, 1, 5, 0, 6, 10,
-      11, 11, 0, 2, 7, 0, 10, 8, 3, 5, 7, 1, 11, 1, 0, 7,
-      9, 0, 11, 5, 10, 3, 2, 3, 5, 9, 7, 9, 8, 4, 6, 5,
-
-      // and a second copy so we don't need an extra mask or static initializer
-      7, 9, 5, 0, 11, 1, 6, 9, 3, 9, 11, 1, 8, 10, 4, 7,
-      8, 6, 1, 5, 3, 10, 9, 10, 0, 8, 4, 1, 5, 2, 7, 8,
-      7, 11, 9, 10, 1, 0, 4, 7, 5, 0, 11, 6, 1, 4, 2, 8,
-      8, 10, 4, 9, 9, 2, 5, 7, 9, 1, 7, 2, 2, 6, 11, 5,
-      5, 4, 6, 9, 0, 1, 1, 0, 7, 6, 9, 8, 4, 10, 3, 1,
-      2, 8, 8, 9, 10, 11, 5, 11, 11, 2, 6, 10, 3, 4, 2, 4,
-      9, 10, 3, 2, 6, 3, 6, 10, 5, 3, 4, 10, 11, 2, 9, 11,
-      1, 11, 10, 4, 9, 4, 11, 0, 4, 11, 4, 0, 0, 0, 7, 6,
-      10, 4, 1, 3, 11, 5, 3, 4, 2, 9, 1, 3, 0, 1, 8, 0,
-      6, 7, 8, 7, 0, 4, 6, 10, 8, 2, 3, 11, 11, 8, 0, 2,
-      4, 8, 3, 0, 0, 10, 6, 1, 2, 2, 4, 5, 6, 0, 1, 3,
-      11, 9, 5, 5, 9, 6, 9, 8, 3, 8, 1, 8, 9, 6, 9, 11,
-      10, 7, 5, 6, 5, 9, 1, 3, 7, 0, 2, 10, 11, 2, 6, 1,
-      3, 11, 7, 7, 2, 1, 7, 3, 0, 8, 1, 1, 5, 0, 6, 10,
-      11, 11, 0, 2, 7, 0, 10, 8, 3, 5, 7, 1, 11, 1, 0, 7,
-      9, 0, 11, 5, 10, 3, 2, 3, 5, 9, 7, 9, 8, 4, 6, 5,
-  ];
-
-  function stb__perlin_lerp(a, b, t) { return a + (b-a) * t; }
-
-  const stb__perlin_fastfloor = Math.floor;
-
-  // different grad function from Perlin's, but easy to modify to match reference
-  function stb__perlin_grad(grad_idx, x, y, z) {
-    // static float basis[12][4] =
-    const basis = [
-      [  1, 1, 0 ],
-      [ -1, 1, 0 ],
-      [  1,-1, 0 ],
-      [ -1,-1, 0 ],
-      [  1, 0, 1 ],
-      [ -1, 0, 1 ],
-      [  1, 0,-1 ],
-      [ -1, 0,-1 ],
-      [  0, 1, 1 ],
-      [  0,-1, 1 ],
-      [  0, 1,-1 ],
-      [  0,-1,-1 ],
-    ];
-
-    const grad = basis[grad_idx];
-    return grad[0]*x + grad[1]*y + grad[2]*z;
-  }
-
-  let u,v,w;
-  let n000,n001,n010,n011,n100,n101,n110,n111;
-  let n00,n01,n10,n11;
-  let n0,n1;
-
-  let x_mask = (x_wrap-1) & 255;
-  let y_mask = (y_wrap-1) & 255;
-  let z_mask = (z_wrap-1) & 255;
-  let px = stb__perlin_fastfloor(x);
-  let py = stb__perlin_fastfloor(y);
-  let pz = stb__perlin_fastfloor(z);
-  let x0 = px & x_mask, x1 = (px+1) & x_mask;
-  let y0 = py & y_mask, y1 = (py+1) & y_mask;
-  let z0 = pz & z_mask, z1 = (pz+1) & z_mask;
-  let r0,r1, r00,r01,r10,r11;
-
-  const stb__perlin_ease = a => (((a*6-15)*a + 10) * a * a * a);
-
-  x -= px; u = stb__perlin_ease(x);
-  y -= py; v = stb__perlin_ease(y);
-  z -= pz; w = stb__perlin_ease(z);
-
-  r0 = stb__perlin_randtab[x0+seed];
-  r1 = stb__perlin_randtab[x1+seed];
-
-  r00 = stb__perlin_randtab[r0+y0];
-  r01 = stb__perlin_randtab[r0+y1];
-  r10 = stb__perlin_randtab[r1+y0];
-  r11 = stb__perlin_randtab[r1+y1];
-
-  n000 = stb__perlin_grad(stb__perlin_randtab_grad_idx[r00+z0], x  , y  , z   );
-  n001 = stb__perlin_grad(stb__perlin_randtab_grad_idx[r00+z1], x  , y  , z-1 );
-  n010 = stb__perlin_grad(stb__perlin_randtab_grad_idx[r01+z0], x  , y-1, z   );
-  n011 = stb__perlin_grad(stb__perlin_randtab_grad_idx[r01+z1], x  , y-1, z-1 );
-  n100 = stb__perlin_grad(stb__perlin_randtab_grad_idx[r10+z0], x-1, y  , z   );
-  n101 = stb__perlin_grad(stb__perlin_randtab_grad_idx[r10+z1], x-1, y  , z-1 );
-  n110 = stb__perlin_grad(stb__perlin_randtab_grad_idx[r11+z0], x-1, y-1, z   );
-  n111 = stb__perlin_grad(stb__perlin_randtab_grad_idx[r11+z1], x-1, y-1, z-1 );
-
-  n00 = stb__perlin_lerp(n000,n001,w);
-  n01 = stb__perlin_lerp(n010,n011,w);
-  n10 = stb__perlin_lerp(n100,n101,w);
-  n11 = stb__perlin_lerp(n110,n111,w);
-
-  n0 = stb__perlin_lerp(n00,n01,v);
-  n1 = stb__perlin_lerp(n10,n11,v);
-
-  return stb__perlin_lerp(n0,n1,u);
-}
-function fbm3(x, y, z, lacunarity, gain, octaves, seed_offset=0) {
-  let freq = 1;
-  let amp = 1;
-  let sum = 0;
-
-  for (let i = 0; i < octaves; i++) {
-    sum += noise3(x*freq, y*freq, z*freq, 0, 0, 0, seed_offset+i)*amp;
-    freq *= lacunarity;
-    amp *= gain;
-  }
-
-  return sum;
-}
-
 function mat4_create() {
   let out = new Float32Array(16);
   out[0] = 1;
@@ -775,6 +596,8 @@ const FURNACE_INDEX_OUT   = 2;
 const FURNACE_INDEX_COUNT = 3;
 
 let state = {
+  view_dist: 3,
+
   tick: 0,
   screen: SCREEN_WORLD,
   screen_block_coord: 0,
@@ -785,7 +608,7 @@ let state = {
   },
 
   chat: [
-    { msg: "CEDCRAFT version 0.0.1 \"ninja\"", ts_in: Date.now() + 1600, ts_out: Date.now() + 10_600 },
+    { msg: "CEDCRAFT version 0.0.3 \"rybek\"", ts_in: Date.now() + 1600, ts_out: Date.now() + 10_600 },
     { msg: "<tab> for inventory",  ts_in: Date.now() + 1700, ts_out: Date.now() + 10_700 },
     { msg: "/help for cmd list",   ts_in: Date.now() + 1800, ts_out: undefined           }
   ],
@@ -850,7 +673,8 @@ const saves_put = save_name => new Promise(async res => {
   for (const chunk_key in state.chunks) {
     const chunk = state.chunks[chunk_key];
 
-    chunks[chunk_key] = { ...chunk, geo: undefined, light: undefined };
+    const genned = (chunk.genned == CHUNK_GEN_DONE) ? CHUNK_GEN_DONE : CHUNK_GEN_NO;
+    chunks[chunk_key] = { ...chunk, genned, geo: undefined, light: undefined };
   }
   (await saves_db())
     .transaction(["saves"], "readwrite")
@@ -892,25 +716,22 @@ const saves_list = () => new Promise(async res => {
     .onsuccess = e => res(e.target.result);
 });
 
+const CHUNK_GEN_NO         = 0;
+const CHUNK_GEN_WIP        = 1; /* no blocks yet, chunk gen requested */
+const CHUNK_GEN_DONE       = 3;
+
 const modulo = (n, d) => ((n % d) + d) % d;
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 const map_index = (x, y, z) => modulo(x, MAP_SIZE)    *MAP_SIZE*MAX_HEIGHT +
                                clamp(y, 0, MAX_HEIGHT)*MAP_SIZE +
                                modulo(z, MAP_SIZE);
-function *map_chunks_near(pos) {
+function *map_chunks_near(pos, range=state.view_dist) {
   const c_x = Math.floor(pos[0] / MAP_SIZE);
   const c_z = Math.floor(pos[2] / MAP_SIZE);
 
-  yield (c_x-1) + ',' + (c_z+0);
-  yield (c_x+1) + ',' + (c_z+0);
-  yield (c_x+0) + ',' + (c_z+0); /* center */
-  yield (c_x+0) + ',' + (c_z-1);
-  yield (c_x+0) + ',' + (c_z+1);
-
-  yield (c_x+1) + ',' + (c_z+1); /* edge */
-  yield (c_x+1) + ',' + (c_z-1); /* edge */
-  yield (c_x-1) + ',' + (c_z-1); /* edge */
-  yield (c_x-1) + ',' + (c_z+1); /* edge */
+  for (let o_x = -range; o_x <= range; o_x++)
+    for (let o_z = -range; o_z <= range; o_z++)
+      yield (c_x+o_x) + ',' + (c_z+o_z);
 }
 const map_chunk_add = (x, y, z) => {
   const c_x = Math.floor(x / MAP_SIZE);
@@ -919,8 +740,9 @@ const map_chunk_add = (x, y, z) => {
 
   state.chunks[chunk_key] = {
     chunk_key,
-    genned: false,
+    genned: CHUNK_GEN_NO,
     dirty: true,
+    incidentals: false,
     x: c_x*MAP_SIZE,
     z: c_z*MAP_SIZE,
     map: new Uint8Array(MAP_SIZE * MAX_HEIGHT * MAP_SIZE),
@@ -1005,173 +827,6 @@ function place_tree(t_x, t_y, t_z) {
           map_set(x, y, z, ID_BLOCK_LEAVES);
         }
       }
-}
-
-function chunk_gen(chunk) {
-  chunk.light_src.fill(0);
-  const c_x = chunk.x;
-  const c_y = 0;
-  const c_z = chunk.z;
-
-  for (let x = -1; x <= 1; x++)
-    for (let z = -1; z <= 1; z++) {
-      const nc_x = c_x + x*16;
-      const nc_z = c_z + z*16;
-      if (map_chunk(nc_x, 0, nc_z) == undefined)
-        map_chunk_add(nc_x, 0, nc_z);
-    }
-
-  const cave = [...Array(MAP_SIZE*MAX_HEIGHT*MAP_SIZE)].fill(0);
-  const dirt_height = [...Array(MAP_SIZE*MAP_SIZE)].fill(0);
-  const stone_height = [...Array(MAP_SIZE*MAP_SIZE)].fill(0);
-  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
-    for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
-      const range = MAP_SIZE;
-      const dirt  = fbm3((c_x + t_x)/range, 0.000, (c_z + t_z)/range, 2, 0.3, 6);
-      const stone = fbm3((c_x + t_x)/range, 0.100, (c_z + t_z)/range, 2, 0.3, 6);
-      const i2D = t_z*MAP_SIZE + t_x;
-       dirt_height[i2D] = Math.ceil(30 + 15* dirt* dirt);
-      stone_height[i2D] = Math.ceil(28 + 15*stone*stone);
-
-      for (let i = 0; i < dirt_height[i2D]+1; i++) {
-        const range = MAP_SIZE;
-        const height_t = Math.min(1, i/40);
-        const mid_t = 2*Math.abs(0.5 - height_t);
-        // console.log({ height_t, mid_t });
-        const f = fbm3((c_x + t_x)/range, i / range, (c_z + t_z)/range, 2, 0.5, 6, 202);
-        cave[map_index(t_x, i, t_z)] = f < lerp(-0.2, -0.75, mid_t);
-      }
-    }
-
-  const chunk_light_src_set = (x, y, z, val) => map_light_src_set(c_x + x, c_y + y, c_z + z, val);
-  const chunk_set = (x, y, z, val) => map_set(c_x + x, c_y + y, c_z + z, val);
-  const chunk_get = (x, y, z     ) => map_get(c_x + x, c_y + y, c_z + z     );
-
-  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
-    for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
-      const t_y     = dirt_height[t_z*MAP_SIZE + t_x];
-      const stone_y = stone_height[t_z*MAP_SIZE + t_x];
-
-      let flower;
-      {
-        if (Math.random() < ( 8/(MAP_SIZE*MAP_SIZE)))
-          flower = (Math.random() < 0.5) ? ID_BLOCK_FLOWER0 : ID_BLOCK_FLOWER1;
-        if (Math.random() < (16/(MAP_SIZE*MAP_SIZE)))
-          flower = ID_BLOCK_FLOWER2;
-      }
-      if (flower) chunk_set(t_x, t_y+1, t_z, flower);
-
-      if (!cave[map_index(t_x, t_y, t_z)])
-        chunk_set(t_x, t_y, t_z, ID_BLOCK_GRASS);
-
-      for (let i = 0; i <= t_y; i++) {
-        if (i > 0 && cave[map_index(t_x, i, t_z)])
-          continue;
-
-        if (i < stone_y)
-          chunk_set(t_x, i, t_z, ID_BLOCK_STONE);
-        else
-          chunk_set(t_x, i, t_z, ID_BLOCK_DIRT);
-      }
-    }
-
-  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
-    for (let t_y = 0; t_y < MAX_HEIGHT; t_y++) 
-      for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
-
-        if (chunk_get(t_x, t_y, t_z) == ID_BLOCK_STONE) {
-          {
-            const min_height = 0;
-            const max_height = 20;
-            const height_range = max_height - min_height;
-            const t = 1 - Math.abs(0.5 - inv_lerp(min_height, max_height, t_y));
-            const per_chunk_avg = 25;
-            const freq = per_chunk_avg/(MAP_SIZE*MAP_SIZE*height_range);
-            if (Math.random() < t*freq) {
-              let vein_size = Math.ceil(3 + 3*Math.random() + Math.random()*Math.random());
-              const v = [t_x, t_y, t_z];
-              for (let i = 0; i < vein_size; i++) {
-                v[Math.floor(Math.random() * 3)] += (Math.random() < 0.5) ? -1 : 1;
-
-                if (chunk == map_chunk(c_x + v[0], c_y + v[1], c_z + v[2]))
-                  if (chunk_get(v[0], v[1], v[2]) == ID_BLOCK_STONE)
-                    chunk_set(v[0], v[1], v[2], ID_BLOCK_ORE_T2);
-              }
-            }
-          }
-          {
-            const min_height = 10;
-            const max_height = 30;
-            const height_range = max_height - min_height;
-            const t = 1 - Math.abs(0.5 - inv_lerp(min_height, max_height, t_y));
-            const per_chunk_avg = 45;
-            const freq = per_chunk_avg/(MAP_SIZE*MAP_SIZE*height_range);
-            if (Math.random() < t*freq) {
-              let vein_size = Math.ceil(5 + 4*Math.random());
-              const v = [t_x, t_y, t_z];
-              for (let i = 0; i < vein_size; i++) {
-                v[Math.floor(Math.random() * 3)] += (Math.random() < 0.5) ? -1 : 1;
-
-                if (chunk == map_chunk(c_x + v[0], c_y + v[1], c_z + v[2]))
-                  if (chunk_get(v[0], v[1], v[2]) == ID_BLOCK_STONE)
-                    chunk_set(v[0], v[1], v[2], ID_BLOCK_ORE_COAL);
-              }
-            }
-          }
-        }
-
-      }
-
-  if (0) for (let i = 0; i < 4; i++) {
-    let t_x = 3;
-    let t_y = 45;
-    let t_z = 1+i;
-    chunk_set(t_x, t_y, t_z, ID_BLOCK_WATER);
-  }
-
-  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
-    for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
-      let t_y = MAX_HEIGHT-1;
-      while (t_y > 0) {
-        const block_id = chunk_get(t_x, t_y, t_z);
-        if (VOXEL_PERFECT[block_id]) {
-          if (block_id == ID_BLOCK_DIRT)
-            chunk_set(t_x, t_y, t_z, ID_BLOCK_GRASS);
-          break;
-        }
-        chunk_light_src_set(t_x, t_y, t_z, LIGHT_SRC_SUN);
-        t_y--;
-      }
-    }
-}
-
-function chunk_growth(chunk) {
-  const c_x = chunk.x;
-  const c_y = 0;
-  const c_z = chunk.z;
-
-  const chunk_light_src_set = (x, y, z, val) => map_light_src_set(c_x + x, c_y + y, c_z + z, val);
-  const chunk_set = (x, y, z, val) => map_set(c_x + x, c_y + y, c_z + z, val);
-  const chunk_get = (x, y, z     ) => map_get(c_x + x, c_y + y, c_z + z     );
-
-  chunk.light.set(chunk.light_src);
-  for (const i in chunk.light)
-    if (chunk.light[i])
-      chunk.light[i] = MAX_LIGHT;
-
-  for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
-    for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
-      let t_y = MAX_HEIGHT-1;
-      while (t_y > 0) {
-        const block_id = chunk_get(t_x, t_y, t_z);
-        if (VOXEL_PERFECT[block_id]) {
-          if (block_id == ID_BLOCK_GRASS && Math.random() < 0.01)
-            place_tree(t_x + c_x, t_y, t_z + c_z);
-          break;
-        }
-        t_y--;
-      }
-    }
 }
 
 /* used for player & particle vs. world collision */
@@ -1943,12 +1598,13 @@ function tick_light_src(chunk, __x, __y, __z) {
 
 const SEC_IN_TICKS = 60;
 const light_worker = new Worker("light_worker.js");
+const worldgen_worker = new Worker("worldgen_worker.js");
 function tick() {
   const pending_map_set = []; 
   const pending_height_set = []; 
   let pending_light_set = []; 
 
-  for (const chunk_key of map_chunks_near(state.pos)) {
+  for (const chunk_key of map_chunks_near(state.pos, 1)) {
     const chunk = state.chunks[chunk_key];
     if (chunk == undefined) continue;
 
@@ -1973,7 +1629,7 @@ function tick() {
   }
   state.tick++;
 
-  for (const chunk_key of map_chunks_near(state.pos)) {
+  for (const chunk_key of map_chunks_near(state.pos, 1)) {
     const chunk = state.chunks[chunk_key];
     if (chunk == undefined) continue;
 
@@ -2917,7 +2573,7 @@ function geo_chunk(geo, chunk) {
     positions[3*3 + c] = 0;
 
     const light_global_lookup = () => (
-      (map_chunk(    chunk.x+t[0], t[1], chunk.z+t[2]) != undefined)
+      (map_chunk(   chunk.x+t[0], t[1], chunk.z+t[2]) != undefined)
         ? map_light(chunk.x+t[0], t[1], chunk.z+t[2])
         : MAX_LIGHT
     );
@@ -3178,7 +2834,7 @@ function geo_fill(geo, gl, program_info, render_stage) {
         geo_draw(chunk.geo, gl, program_info, geo.default_view_proj);
       }
 
-      if (render_stage == 2) {
+      if (render_stage == 2, 0) {
         const delta = mul3_f(cam_looking(), -1);
 
         // for (let __x = 0; __x < MAP_SIZE; __x++) 
@@ -3279,16 +2935,17 @@ function geo_fill(geo, gl, program_info, render_stage) {
     if (item_id == 0               ) scale = 1.5, swing_rot = -45,
                                      pos = [aspect*0.75, -0.625, -1.85];
 
-    if (state.mining.ts_end > Date.now()) {
+    const now = Date.now();
+    if (state.mining.ts_end > now) {
 
-      let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, Date.now());
+      let t = inv_lerp(state.mining.ts_start, state.mining.ts_end, now);
       t = Math.min(1, 8*(1 - 2*Math.abs(0.5 - t)));
 
-      swing_rot += 20*t*Math.cos(Date.now() * 0.03);
+      swing_rot += 20*t*Math.cos(now * 0.03);
     }
 
-    if (state.using.ts_end > Date.now()) {
-      let t = inv_lerp(state.using.ts_start, state.using.ts_end, Date.now());
+    if (state.using.ts_end > now) {
+      let t = inv_lerp(state.using.ts_start, state.using.ts_end, now);
       t = (1 - 2.2*Math.abs(0.5 - t));
       t = ease_out_sine(t);
       swing_rot -= 40*t;
@@ -3941,32 +3598,101 @@ function geo_fill(geo, gl, program_info, render_stage) {
 function light_recalc() {
   for (const chunk_key of map_chunks_near(state.pos)) {
     const chunk = state.chunks[chunk_key];
+    if (chunk == undefined) continue;
     const { x, z, light_src } = chunk;
     light_worker.postMessage({ chunk: { key: chunk_key, x, z, light_src } });
   }
   light_worker.postMessage({ compute: 1, around: state.pos });
 }
+function chunk_gen(chunk_key) {
+  if (state.chunks[chunk_key] == undefined) {
+    const [c_x, c_z] = chunk_key.split(',');
+    map_chunk_add(c_x*MAP_SIZE, 0, c_z*MAP_SIZE);
+  }
+
+  state.chunks[chunk_key].genned = CHUNK_GEN_WIP;
+  const { x, z } = state.chunks[chunk_key];
+  worldgen_worker.postMessage({ chunk: { key: chunk_key, x, z } });
+}
 (async () => {
   const canvas = document.getElementById("p1");
   const gl = canvas.getContext("webgl", { antialias: false });
 
-  for (const chunk_key of map_chunks_near(state.pos)) {
-    const [c_x, c_z] = chunk_key.split(',');
-    const chunk = state.chunks[chunk_key] ?? map_chunk_add(c_x*MAP_SIZE, 0, c_z*MAP_SIZE);
-    chunk_gen(chunk);
+  const firstgen = {};
+  const firstgen_range = 1;
+  for (const chunk_key of map_chunks_near(state.pos, firstgen_range)) {
+    firstgen[chunk_key] = { promise: undefined, res: undefined };
+    firstgen[chunk_key].promise = new Promise(res => firstgen[chunk_key].res = res);
+    chunk_gen(chunk_key);
   }
 
-  for (const chunk_key of map_chunks_near(state.pos)) {
-    chunk_growth(state.chunks[chunk_key]);
-    state.chunks[chunk_key].genned = 1;
-  }
+  worldgen_worker.onmessage = ({ data }) => {
+    const { key, map, light_src, incidentals } = data.chunk;
 
-  light_recalc();
+    for (const chunk_key in incidentals) {
+      const inc = incidentals[chunk_key];
+      for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
+        for (let t_y = 0; t_y < MAX_HEIGHT; t_y++) 
+          for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
+            if (state.chunks[chunk_key] == undefined) {
+              const [c_x, c_z] = chunk_key.split(',');
+              map_chunk_add(c_x*MAP_SIZE, 0, c_z*MAP_SIZE);
+            }
+            state.chunks[chunk_key].incidentals = true;
+
+            const i = map_index(t_x, t_y, t_z);
+            if (inc.map[i] != ID_BLOCK_NONE && state.chunks[chunk_key].map[i] == ID_BLOCK_NONE) {
+              state.chunks[chunk_key].map[i] = inc.map[i];
+              state.chunks[chunk_key].dirty = 1;
+            }
+          }
+    }
+    const chunk = state.chunks[key];
+    if (chunk.genned == CHUNK_GEN_DONE) debugger;
+    chunk.light_src = light_src;
+    if (chunk.incidentals == false)
+      chunk.map = map;
+    else {
+      for (let t_x = 0; t_x < MAP_SIZE; t_x++) 
+        for (let t_y = 0; t_y < MAX_HEIGHT; t_y++) 
+          for (let t_z = 0; t_z < MAP_SIZE; t_z++) {
+            const i = map_index(t_x, t_y, t_z);
+            if (chunk.map[i] == ID_BLOCK_NONE)
+              chunk.map[i] = map[i];
+          }
+    }
+    chunk.genned    = CHUNK_GEN_DONE;
+
+    /* use light_src as placeholder for light until recalc */
+    chunk.light.set(chunk.light_src);
+    for (const i in chunk.light)
+      if (chunk.light[i])
+        chunk.light[i] = MAX_LIGHT;
+
+    chunk.dirty = 1;
+
+    light_recalc();
+
+    if (firstgen[key]) {
+      firstgen[key].res();
+      delete firstgen[key];
+    }
+  };
   light_worker.onmessage = ({ data }) => {
     state.chunks[data.chunk_key].light = data.light;
     state.chunks[data.chunk_key].dirty = 1;
+
+    const c_x = Math.floor(pos[0] / MAP_SIZE);
+    const c_z = Math.floor(pos[2] / MAP_SIZE);
+    const rest = [[1, 1], [1, -1], [-1, -1], [-1, 1]];
+    for (const [o_x, o_z] of rest) {
+      const chunk = state.chunks[(c_x+o_x) + ',' + (c_z+o_z)];
+      if (chunk != undefined) chunk.dirty = 1;
+    }
   };
 
+  await Promise.all(Object.values(firstgen).map(x => x.promise));
+  
   if (gl === null) alert(
     "Unable to initialize WebGL. Your browser or machine may not support it."
   );
@@ -4018,25 +3744,10 @@ function light_recalc() {
     /* gen more map on demand */
     {
       for (const chunk_key of map_chunks_near(state.pos)) {
-        let chunk = state.chunks[chunk_key]
-        if (chunk == undefined) {
-          const [c_x, c_z] = chunk_key.split(',');
-          chunk = map_chunk_add(c_x*MAP_SIZE, 0, c_z*MAP_SIZE);
-        }
-        if (!chunk.genned) chunk_gen(chunk);
+        let chunk = state.chunks[chunk_key];
+        if (chunk == undefined || chunk.genned == CHUNK_GEN_NO)
+          chunk_gen(chunk_key);
       }
-
-      let needs_light_recalc = 0;
-      for (const chunk_key of map_chunks_near(state.pos)) {
-        const chunk = state.chunks[chunk_key];
-        if (!chunk.genned) {
-          needs_light_recalc = 1;
-          chunk_growth(chunk);
-          chunk.genned = 1;
-        }
-      }
-
-      if (needs_light_recalc) light_recalc();
     }
 
     /* spritesheet shower helper thingy */
